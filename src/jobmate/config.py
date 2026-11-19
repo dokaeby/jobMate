@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     radar_max_repos: int = 30
     radar_queries_path: Path | None = None
 
+    # 코딩 도구 어댑터 — implementer 단계를 CLI 코딩 에이전트로 실행
+    # none|claude|codex|antigravity|opencode
+    coding_tool: str = "none"
+    coding_workspace: str = ""        # 비우면 data/workspaces/<run_id>에 git repo 생성
+    coding_timeout_seconds: float = 600.0
+
     def model_for(self, role: str, tier: str = "default") -> ModelConfig:
         """역할별 오버라이드 → 티어 기본값 순으로 ModelConfig를 만든다.
         debug 모드에서는 tier와 무관하게 항상 default(gemini)만 사용한다."""
