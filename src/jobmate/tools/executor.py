@@ -1,0 +1,54 @@
+"""도구 실행기 — 에이전트별 allowlist를 서버에서 강제한다."""
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Callable
+from typing import Any
+
+
+class ToolDeniedError(Exception):
+    pass
+
+
+class ToolExecutor:
+    """allowlist에 있는 도구만 실행. 결과 크기 제한."""
+
+    MAX_RESULT_CHARS = 20_000
+
+    def __init__(self, tools: dict[str, Callable[..., Any]] | None = None,
+                 repo_root: str | None = None) -> None:
+        self._tools = tools or self._default_tools(repo_root)
+
+    @staticmethod
+    def _default_tools(repo_root: str | None) -> dict[str, Callable[..., Any]]:
+        import os
+        root = repo_root or os.getcwd()
+
+        def read_file(path: str) -> str:
+            p = os.path.normpath(os.path.join(root, path))
+            if not p.startswith(os.path.abspath(root)):
+                raise ToolDeniedError("path outside repo")
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return f.read()[:ToolExecutor.MAX_RESULT_CHARS]
+
+        def run_tests(command: str = "pytest -q") -> dict[str, Any]:
+            proc = subprocess.run(command.split(), cwd=root, capture_output=True,  # noqa: S603
+                                  text=True, timeout=300)
+            out = (proc.stdout + proc.stderr)[:ToolExecutor.MAX_RESULT_CHARS]
+            return {"exit_code": proc.returncode, "output": out}
+
+        def read_diff(diff_text: str) -> dict[str, Any]:
+            # diff 텍스트를 그대로 검토용으로 반환 (파일시스템 변경 없음)
+            return {"diff": diff_text[:ToolExecutor.MAX_RESULT_CHARS],
+                    "lines": diff_text.count("\n")}
+
+        return {"read_file": read_file, "run_tests": run_tests,
+                "read_diff": read_diff}
+
+    def call(self, tool_name: str, allowed: list[str], **kwargs: Any) -> Any:
+        if tool_name not in allowed:
+            raise ToolDeniedError(f"tool '{tool_name}' not in allowlist")
+        fn = self._tools.get(tool_name)
+        if fn is None:
+            raise ToolDeniedError(f"unknown tool '{tool_name}'")
+        return fn(**kwargs)

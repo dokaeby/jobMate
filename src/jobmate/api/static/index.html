@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobMate</title>
+<style>
+  :root {
+    --accent: #2563eb;
+    --ink: #111827;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --bg: #ffffff;
+    --ok: #047857;
+    --warn: #b45309;
+    --err: #b91c1c;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Fira Sans", "Pretendard", system-ui, sans-serif;
+    color: var(--ink); background: var(--bg); line-height: 1.5;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+  header { display: flex; align-items: baseline; gap: 12px;
+           border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 14px; }
+  section { margin-top: 32px; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase;
+       letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; }
+  form { display: grid; gap: 12px; }
+  textarea, select, input {
+    font: inherit; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: var(--radius); background: var(--bg); color: var(--ink);
+  }
+  textarea:focus, select:focus, input:focus, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  button {
+    font: inherit; font-weight: 500; padding: 10px 18px; cursor: pointer;
+    border: 1px solid var(--accent); border-radius: var(--radius);
+    background: var(--accent); color: #fff;
+    transition: background 160ms ease;
+  }
+  button:hover { background: #1d4ed8; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button.secondary:hover { background: #eff6ff; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-line { font-size: 14px; color: var(--muted); min-height: 20px; }
+  .status-line.err { color: var(--err); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px;
+           border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; font-weight: 600; color: var(--muted);
+       text-transform: uppercase; letter-spacing: 0.05em; }
+  .table-scroll { overflow-x: auto; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
+           font-size: 12px; font-weight: 500; border: 1px solid var(--line); }
+  .badge.completed { color: var(--ok); border-color: var(--ok); }
+  .badge.failed, .badge.rejected { color: var(--err); border-color: var(--err); }
+  .badge.running, .badge.queued { color: var(--accent); border-color: var(--accent); }
+  .badge.waiting_approval, .badge.needs_human, .badge.budget_exhausted {
+    color: var(--warn); border-color: var(--warn); }
+  .mono { font-family: "Fira Code", ui-monospace, monospace; font-size: 13px; }
+  details { border: 1px solid var(--line); border-radius: var(--radius);
+            padding: 10px 14px; margin-top: 8px; }
+  summary { cursor: pointer; font-size: 14px; font-weight: 500; }
+  pre { overflow-x: auto; font-size: 12px; background: #f9fafb;
+        padding: 12px; border-radius: var(--radius); }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>jobMate</h1>
+    <span class="sub">에이전트 하네스 · dev_review / gmail_calendar / skill_radar</span>
+  </header>
+
+  <section aria-labelledby="new-run">
+    <h2 id="new-run">새 실행</h2>
+    <form id="run-form">
+      <label class="sub" for="workflow">워크플로</label>
+      <select id="workflow" name="workflow">
+        <option value="dev_review">dev_review</option>
+        <option value="gmail_calendar">gmail_calendar</option>
+        <option value="skill_radar">skill_radar</option>
+      </select>
+      <label class="sub" for="task">작업 지시</label>
+      <textarea id="task" name="task" rows="4" required
+        placeholder="예: 로그인 실패 시 재시도 로직 추가"></textarea>
+      <div>
+        <button type="submit">실행</button>
+        <span class="status-line" id="form-status" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+
+  <section aria-labelledby="runs">
+    <h2 id="runs">실행 이력</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>ID</th><th>워크플로</th><th>상태</th><th>생성</th><th></th></tr></thead>
+        <tbody id="runs-body"><tr><td colspan="5" class="sub">로딩…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="radar">
+    <h2 id="radar">스킬 레이더
+      <select id="radar-platform" style="font-size:13px;padding:4px 8px;margin-left:8px">
+        <option value="claude">claude</option>
+        <option value="chatgpt">chatgpt</option>
+        <option value="gemini">gemini</option>
+      </select>
+      <button class="secondary" id="radar-refresh" style="font-size:13px;padding:4px 12px">새로고침</button>
+    </h2>
+    <div id="radar-body" class="sub">데이터 없음</div>
+  </section>
+
+  <section aria-labelledby="detail">
+    <h2 id="detail">실행 상세</h2>
+    <div id="detail-body" class="sub">좌측 목록에서 실행을 선택하세요.</div>
+  </section>
+</div>
+
+<script>
+const API = "/api/v1";
+const $ = (s) => document.querySelector(s);
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error ? j.error.message : r.statusText);
+  }
+  return r.json();
+}
+
+function badge(status) {
+  return `<span class="badge ${status}">${status}</span>`;
+}
+
+async function refreshRuns() {
+  try {
+    const runs = await api("/runs?limit=30");
+    const tb = $("#runs-body");
+    if (!runs.length) { tb.innerHTML = '<tr><td colspan="5" class="sub">실행 없음</td></tr>'; return; }
+    tb.innerHTML = runs.map(r => `<tr>
+      <td class="mono">${r.id}</td><td>${r.workflow}</td>
+      <td>${badge(r.status)}</td><td class="sub">${r.created_at.slice(0,19).replace('T',' ')}</td>
+      <td><button class="secondary" data-id="${r.id}">상세</button></td></tr>`).join("");
+    tb.querySelectorAll("button[data-id]").forEach(b =>
+      b.addEventListener("click", () => showDetail(b.dataset.id)));
+  } catch (e) {
+    $("#runs-body").innerHTML = `<tr><td colspan="5" class="sub">${e.message}</td></tr>`;
+  }
+}
+
+async function showDetail(id) {
+  const el = $("#detail-body");
+  el.textContent = "로딩…";
+  try {
+    const d = await api("/runs/" + id);
+    const stages = (d.stages || []).map(s =>
+      `<li><span class="mono">${s.stage_key}</span> #${s.attempt} — ${s.status}` +
+      (s.error ? ` <span class="sub">(${s.error.slice(0,80)})</span>` : "") + `</li>`).join("");
+    const pr = d.metadata && d.metadata.pr_summary
+      ? `<details><summary>PR 요약</summary><pre>${escapeHtml(d.metadata.pr_summary)}</pre></details>` : "";
+    const appr = (d.approvals || []).map(a =>
+      `<li>${a.decision} — ${a.comment || ""} <span class="sub">${a.decided_at}</span></li>`).join("");
+    let approveBtn = "";
+    if (d.status === "waiting_approval") {
+      approveBtn = `<div style="margin-top:12px">
+        <button data-dec="approve">승인</button>
+        <button class="secondary" data-dec="reject">거부</button></div>`;
+    }
+    el.innerHTML = `
+      <p><span class="mono">${d.id}</span> ${badge(d.status)}
+         <span class="sub">${d.workflow} v${d.version}</span></p>
+      ${d.error ? `<p style="color:var(--err)">${escapeHtml(d.error)}</p>` : ""}
+      <h2>단계</h2><ul>${stages || "<li class='sub'>없음</li>"}</ul>
+      ${appr ? `<h2>승인 기록</h2><ul>${appr}</ul>` : ""}
+      ${pr}${approveBtn}`;
+    el.querySelectorAll("button[data-dec]").forEach(b =>
+      b.addEventListener("click", async () => {
+        try {
+          await api(`/runs/${id}/approve`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({decision: b.dataset.dec})});
+          showDetail(id); refreshRuns();
+        } catch (e) { alert(e.message); }
+      }));
+  } catch (e) { el.textContent = e.message; }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+$("#run-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const st = $("#form-status");
+  st.textContent = "제출 중…"; st.className = "status-line";
+  try {
+    const r = await api("/runs", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({workflow: $("#workflow").value,
+                            task: $("#task").value})});
+    st.textContent = `실행 시작: ${r.id}`;
+    $("#task").value = "";
+    refreshRuns();
+  } catch (err) { st.textContent = err.message; st.className = "status-line err"; }
+});
+
+async function refreshRadar() {
+  const p = $("#radar-platform").value;
+  try {
+    const d = await api(`/radar/trending?platform=${p}&lang=ko`);
+    const el = $("#radar-body");
+    if (!d.items || !d.items.length) { el.textContent = "데이터 없음"; return; }
+    el.innerHTML = `<div class="sub" style="margin-bottom:8px">${d.date}</div>` +
+      d.items.slice(0, 10).map(i => `
+      <details><summary>#${i.rank} ${escapeHtml(i.repo)}
+        <span class="sub">★${i.stars}${i.stars_today ? ` (+${i.stars_today})` : ""}</span>
+      </summary>
+      <p style="margin:8px 0">${escapeHtml(i.summary || i.description || "")}</p>
+      <p class="sub mono"><a href="${escapeHtml(i.url)}" style="color:var(--accent)">${escapeHtml(i.url)}</a>
+        ${i.language ? ` · ${escapeHtml(i.language)}` : ""}${i.license ? ` · ${escapeHtml(i.license)}` : ""}
+        ${i.taxonomy ? ` · ${escapeHtml(i.taxonomy)}` : ""}</p></details>`).join("");
+  } catch (e) {
+    $("#radar-body").textContent = e.message;
+  }
+}
+
+$("#radar-refresh").addEventListener("click", async () => {
+  try {
+    const r = await api("/radar/refresh", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({platforms: [$("#radar-platform").value], force: true})});
+    $("#form-status").textContent = `레이더 수집 시작: ${r.run_ids.join(",")}`;
+    refreshRuns();
+  } catch (e) { alert(e.message); }
+});
+$("#radar-platform").addEventListener("change", refreshRadar);
+
+refreshRadar();
+refreshRuns();
+setInterval(refreshRuns, 5000);
+</script>
+</body>
+</html>

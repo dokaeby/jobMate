@@ -1,0 +1,538 @@
+"""FastAPI 제공층 — 임시. 상용 단계 Django 전환 예정.
+
+도메인 엔진(jobmate.engine/workflows)은 HTTP 프레임워크에 의존하지 않는다.
+"""
+from __future__ import annotations
+
+import json
+import os
+import threading
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from ..adapters import LoggingNotifier
+from ..config import Settings, get_settings
+from ..llm import CompositeLLM
+from ..models import RunStatus
+from ..radar import GitHubAPI
+from ..sensors import (
+    allowed_identifier,
+    verify_slack_signature,
+    verify_telegram_secret,
+)
+from ..store.db import Store
+from ..workflows import WORKFLOWS
+from ..workflows.registry_builder import build_runner
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+class RunCreateRequest(BaseModel):
+    workflow: str = "dev_review"
+    task: str = Field(min_length=1, max_length=20_000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalRequest(BaseModel):
+    decision: str = Field(pattern="^(approve|reject)$")
+    comment: str = ""
+
+
+def _default_adapters(settings: Settings) -> dict[str, Any]:
+    adapters: dict[str, Any] = {
+        "notifier": LoggingNotifier(),
+        "github": GitHubAPI(token=os.environ.get(settings.github_token_env, "")),
+    }
+    return adapters
+
+
+def create_app(settings: Settings | None = None,
+               store: Store | None = None,
+               llm: Any | None = None,
+               adapters: dict[str, Any] | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    store = store or Store(settings.db_path)
+    llm = llm or CompositeLLM()
+    adapters = adapters if adapters is not None else _default_adapters(settings)
+    stop_event = threading.Event()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.store = store
+        app.state.settings = settings
+        app.state.llm = llm
+        app.state.adapters = adapters
+        worker = threading.Thread(target=_automation_loop,
+                                  args=(store, settings, llm, adapters,
+                                        stop_event),
+                                  daemon=True)
+        worker.start()
+        yield
+        stop_event.set()
+        store.close()
+
+    app = FastAPI(title="jobMate Harness", version="0.1.0", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    def err(status: int, code: str, message: str, request: Request) -> JSONResponse:
+        return JSONResponse(status_code=status, content={
+            "error": {"code": code, "message": message,
+                      "request_id": request.headers.get("x-request-id", uuid.uuid4().hex[:12])}})
+
+    def run_detail(run_id: str) -> dict[str, Any] | None:
+        run = store.get_run(run_id)
+        if run is None:
+            return None
+        return {
+            "id": run.id, "workflow": run.workflow_key,
+            "version": run.workflow_version, "status": run.status.value,
+            "trace_id": run.trace_id, "error": run.error,
+            "input": run.input, "metadata": run.metadata,
+            "created_at": run.created_at.isoformat(),
+            "updated_at": run.updated_at.isoformat(),
+            "stages": [s.model_dump(mode="json") for s in store.get_stage_runs(run_id)],
+            "approvals": [a.model_dump(mode="json") for a in store.get_approvals(run_id)],
+            "audit": [a.model_dump(mode="json") for a in store.get_audit(run_id)],
+        }
+
+    def execute_run(run_id: str, workflow: str, payload: dict[str, Any],
+                    ctx: dict[str, Any] | None = None) -> None:
+        try:
+            runner = build_runner(workflow, store=store, llm=llm,
+                                  settings=settings, adapters=adapters)
+            runner.invoke(run_id, payload, gmail_ctx=ctx)
+        except Exception as e:
+            store.update_run(run_id, status=RunStatus.FAILED,
+                             error=str(e)[:500])
+            store.audit(run_id, "system", "runner_error", "",
+                        {"error": str(e)[:300]})
+
+    def submit_run(workflow: str, task: str,
+                   ctx: dict[str, Any] | None = None) -> str:
+        run = store.create_run(workflow, WORKFLOWS[workflow].version,
+                               {"task": task}, trace_id=uuid.uuid4().hex)
+        threading.Thread(target=execute_run,
+                         args=(run.id, workflow, {"task": task}, ctx),
+                         daemon=True).start()
+        return run.id
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/api/v1/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/api/v1/workflows")
+    def list_workflows() -> list[dict[str, str]]:
+        return [{"key": w.key, "version": w.version} for w in WORKFLOWS.values()]
+
+    @app.post("/api/v1/runs", status_code=202)
+    def create_run(body: RunCreateRequest, request: Request) -> JSONResponse:
+        if body.workflow not in WORKFLOWS:
+            return err(404, "unknown_workflow", f"workflow '{body.workflow}' not found",
+                       request)
+        run = store.create_run(body.workflow, WORKFLOWS[body.workflow].version,
+                               {"task": body.task, **({"meta": body.metadata}
+                                                      if body.metadata else {})},
+                               trace_id=uuid.uuid4().hex)
+        threading.Thread(target=execute_run,
+                         args=(run.id, body.workflow, {"task": body.task}, None),
+                         daemon=True).start()
+        return JSONResponse(status_code=202,
+                            content={"id": run.id, "status": run.status.value})
+
+    @app.get("/api/v1/runs")
+    def list_runs(limit: int = 50) -> list[dict[str, Any]]:
+        return [{"id": r.id, "workflow": r.workflow_key, "status": r.status.value,
+                 "created_at": r.created_at.isoformat()} for r in store.list_runs(limit)]
+
+    @app.get("/api/v1/runs/{run_id}")
+    def get_run(run_id: str, request: Request) -> JSONResponse:
+        d = run_detail(run_id)
+        if d is None:
+            return err(404, "not_found", "run not found", request)
+        return JSONResponse(content=d)
+
+    @app.post("/api/v1/runs/{run_id}/approve")
+    def approve(run_id: str, body: ApprovalRequest, request: Request) -> JSONResponse:
+        run = store.get_run(run_id)
+        if run is None:
+            return err(404, "not_found", "run not found", request)
+        if run.status != RunStatus.WAITING_APPROVAL:
+            return err(409, "invalid_state",
+                       f"run status is {run.status.value}, not waiting_approval",
+                       request)
+        runner = build_runner(run.workflow_key, store=store, llm=llm,
+                              settings=settings, adapters=adapters)
+        try:
+            runner.resume(run_id, {"decision": body.decision,
+                                   "comment": body.comment})
+        except Exception as e:
+            return err(500, "resume_failed", str(e)[:300], request)
+        d = run_detail(run_id)
+        return JSONResponse(content=d or {})
+
+    @app.get("/api/v1/notifications")
+    def notifications(limit: int = 50) -> list[dict[str, Any]]:
+        return [n.model_dump(mode="json") for n in store.list_notifications(limit)]
+
+    @app.get("/api/v1/event-links")
+    def event_links(limit: int = 50) -> list[dict[str, Any]]:
+        return [x.model_dump(mode="json") for x in store.list_links(limit)]
+
+    @app.get("/api/v1/gmail-calendar")
+    def gmail_status() -> dict[str, Any]:
+        auto = store.get_automation()
+        return {"enabled": auto.get("enabled", False),
+                "last_poll_at": auto.get("last_poll_at"),
+                "last_poll_result": auto.get("last_poll_result", "")}
+
+    @app.post("/api/v1/gmail-calendar/toggle")
+    def gmail_toggle(body: dict[str, Any]) -> dict[str, Any]:
+        auto = store.get_automation()
+        auto["enabled"] = bool(body.get("enabled", not auto.get("enabled", False)))
+        store.set_automation(auto)
+        return {"enabled": auto["enabled"]}
+
+    @app.post("/api/v1/gmail-calendar/poll")
+    def gmail_poll(request: Request) -> JSONResponse:
+        gmail = adapters.get("gmail")
+        if gmail is None:
+            return JSONResponse(status_code=202, content={
+                "status": "accepted",
+                "note": "poll requires configured gmail adapter"})
+        ingested = _poll_gmail(store, settings, gmail)
+        return JSONResponse(status_code=202,
+                            content={"status": "accepted",
+                                     "ingested": ingested})
+
+    # ---- calendar-agent: 멀티채널 웹훅·수신함·이벤트·알림예약 ----
+    @app.post("/api/v1/webhooks/slack")
+    async def slack_webhook(request: Request) -> JSONResponse:
+        body = await request.body()
+        if not verify_slack_signature(
+                body, request.headers.get("X-Slack-Request-Timestamp", ""),
+                request.headers.get("X-Slack-Signature", ""),
+                settings.slack_signing_secret):
+            return err(401, "invalid_signature", "bad slack signature", request)
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return err(400, "bad_json", "invalid JSON", request)
+        if payload.get("type") == "url_verification":
+            return JSONResponse(content={"challenge": payload.get("challenge", "")})
+        event = payload.get("event") or {}
+        if (payload.get("type") != "event_callback"
+                or event.get("type") != "message"
+                or event.get("bot_id")
+                or event.get("subtype") not in (None, "file_share")
+                or not (event.get("text") or "").strip()):
+            return JSONResponse(content={"status": "ignored"})
+        channel = event.get("channel", "")
+        if not allowed_identifier(channel, settings.slack_channel_ids):
+            return JSONResponse(content={"status": "ignored"})
+        team = payload.get("team_id", "")
+        ts = event.get("ts", "")
+        source_id = f"{team}:{channel}:{ts}"
+        text = event.get("text", "")
+        created = store.save_message_extraction(
+            "slack", source_id, event.get("thread_ts") or ts, {},
+            "pending", source_text=text[:8000])
+        return JSONResponse(content={
+            "status": "processed" if created else "duplicate",
+            "source_id": source_id})
+
+    @app.post("/api/v1/webhooks/telegram")
+    async def telegram_webhook(request: Request) -> JSONResponse:
+        if not verify_telegram_secret(
+                request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""),
+                settings.telegram_webhook_secret):
+            return err(401, "invalid_secret", "bad telegram secret", request)
+        try:
+            update = json.loads(await request.body())
+        except json.JSONDecodeError:
+            return err(400, "bad_json", "invalid JSON", request)
+        msg = update.get("message") or update.get("channel_post") or {}
+        sender = msg.get("from") or {}
+        if sender.get("is_bot"):
+            return JSONResponse(content={"status": "ignored"})
+        text = msg.get("text") or msg.get("caption") or ""
+        chat_id = str((msg.get("chat") or {}).get("id", ""))
+        if not text.strip() or not allowed_identifier(
+                chat_id, settings.telegram_chat_ids):
+            return JSONResponse(content={"status": "ignored"})
+        source_id = f"{chat_id}:{msg.get('message_id', '')}"
+        created = store.save_message_extraction(
+            "telegram", source_id,
+            str(msg.get("message_thread_id") or msg.get("message_id", "")),
+            {}, "pending", source_text=text[:8000])
+        return JSONResponse(content={
+            "status": "processed" if created else "duplicate",
+            "source_id": source_id})
+
+    @app.get("/api/v1/messages")
+    def list_messages(provider: str | None = None,
+                      limit: int = 20) -> dict[str, Any]:
+        return {"messages": store.list_message_extractions(provider, limit)}
+
+    @app.post("/api/v1/messages/{provider}/{source_id}/retry")
+    def retry_message(provider: str, source_id: str,
+                      request: Request) -> JSONResponse:
+        if provider not in ("gmail", "slack", "telegram"):
+            return err(400, "bad_provider", "unknown provider", request)
+        if not store.has_message(provider, source_id):
+            return err(404, "not_found", "message not found", request)
+        store.finish_message(provider, source_id, "pending")
+        return JSONResponse(content={"status": "pending"})
+
+    @app.get("/api/v1/listeners/status")
+    def listeners_status() -> dict[str, Any]:
+        auto = store.get_automation()
+        return {
+            "auto_register": settings.auto_register,
+            "gmail_enabled": bool(adapters.get("gmail")),
+            "gmail_last_error": auto.get("last_gmail_error", ""),
+            "slack_configured": bool(settings.slack_signing_secret),
+            "telegram_configured": bool(settings.telegram_webhook_secret),
+        }
+
+    @app.get("/api/v1/events")
+    def list_events(status: str | None = None,
+                    limit: int = 50) -> list[dict[str, Any]]:
+        return store.list_scheduled_events(status, limit)
+
+    @app.get("/api/v1/notification-jobs")
+    def notification_jobs(limit: int = 50) -> list[dict[str, Any]]:
+        return store.list_notification_jobs(limit)
+
+    # ---- skillRadar ----
+    @app.get("/api/v1/radar/trending")
+    def radar_trending(platform: str = "claude",
+                       date: str | None = None,
+                       lang: str = "ko") -> JSONResponse:
+        date_str = date or datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+        snap = store.radar_snapshot(platform, date_str)
+        if snap is None:
+            # 최신 스냅샷으로 폴백
+            dates = store.radar_dates(platform)
+            if not dates:
+                return JSONResponse(status_code=404, content={
+                    "error": {"code": "no_snapshot",
+                              "message": "no snapshot for platform"}})
+            date_str = dates[0]
+            snap = store.radar_snapshot(platform, date_str)
+        if snap is None:
+            return JSONResponse(content={"items": [], "date": date_str})
+        items = store.radar_items(int(snap["id"]))
+        lang_key = {"ko": "summary_ko", "en": "summary_en",
+                    "zh": "summary_zh"}.get(lang, "summary_ko")
+        return JSONResponse(content={
+            "platform": platform, "date": date_str, "lang": lang,
+            "items": [{
+                "rank": i["rank"], "repo": i["repo_full_name"],
+                "url": i["repo_url"], "description": i["description"],
+                "stars": i["stars"], "stars_today": i["stars_today"],
+                "language": i["language"], "license": i["license"],
+                "taxonomy": i["taxonomy"],
+                "summary": i.get(lang_key) or i.get("summary_ko", ""),
+            } for i in items]})
+
+    @app.get("/api/v1/radar/dates")
+    def radar_dates(platform: str = "claude") -> dict[str, Any]:
+        return {"platform": platform, "dates": store.radar_dates(platform)}
+
+    @app.post("/api/v1/radar/refresh", status_code=202)
+    def radar_refresh(body: dict[str, Any] | None = None) -> JSONResponse:
+        body = body or {}
+        platforms = body.get("platforms") or settings.radar_platforms
+        force = bool(body.get("force", True))
+        ids = []
+        for p in platforms:
+            rid = submit_run("skill_radar", f"radar collect {p}",
+                             {"platform": p, "force": force})
+            ids.append(rid)
+        return JSONResponse(status_code=202,
+                            content={"run_ids": ids, "platforms": platforms})
+
+    # ---- Web Push 구독 ----
+    @app.get("/api/v1/push/vapid-key")
+    def vapid_key() -> dict[str, str]:
+        return {"public_key": os.environ.get("VAPID_PUBLIC_KEY", "")}
+
+    @app.post("/api/v1/push/subscribe")
+    def push_subscribe(body: dict[str, Any]) -> dict[str, str]:
+        endpoint = body.get("endpoint", "")
+        keys = body.get("keys") or {}
+        if endpoint:
+            store.save_push_subscription(endpoint, keys)
+        return {"status": "subscribed"}
+
+    @app.post("/api/v1/push/unsubscribe")
+    def push_unsubscribe(body: dict[str, Any]) -> dict[str, str]:
+        store.delete_push_subscription(body.get("endpoint", ""))
+        return {"status": "unsubscribed"}
+
+    return app
+
+
+# ---------- automation worker ----------
+
+def _automation_loop(store: Store, settings: Settings, llm: Any,
+                     adapters: dict[str, Any], stop: threading.Event) -> None:
+    """calendar-agent worker 포팅: pending 메시지 처리 + 알림 예약 발송 +
+    gmail 폴링 + radar 일일 수집."""
+    while not stop.is_set():
+        try:
+            _process_pending_messages(store, settings, llm, adapters)
+            _process_due_notification_jobs(store, adapters)
+            _maybe_poll_gmail(store, settings, adapters)
+            _maybe_daily_radar(store, settings, llm, adapters)
+        except Exception:
+            import logging
+            logging.getLogger("jobmate.worker").exception(
+                "automation loop error")
+        stop.wait(settings.worker_interval_seconds)
+
+
+def _process_pending_messages(store: Store, settings: Settings, llm: Any,
+                              adapters: dict[str, Any]) -> None:
+    for row in store.pending_messages():
+        provider = row["source_provider"]
+        source_id = row["source_id"]
+        attempts = int(row.get("attempts", 0)) + 1
+        try:
+            if attempts > 5:
+                store.finish_message(provider, source_id, "failed",
+                                     "max attempts", attempts=attempts)
+                continue
+            ctx = {
+                "source_provider": provider,
+                "source_id": source_id,
+                "thread_id": row.get("thread_id", ""),
+                "message_text": row.get("source_text", ""),
+            }
+            if provider == "gmail":
+                ctx["gmail_message_id"] = source_id
+            run_id = _create_and_run(store, settings, llm, adapters,
+                                     "gmail_calendar", "message intake", ctx)
+            store.finish_message(provider, source_id, "processed",
+                                 f"run:{run_id}", attempts=attempts)
+        except Exception as e:
+            retry_at = (datetime.now(UTC)
+                        + timedelta(seconds=min(300, 2 ** attempts)))
+            store.finish_message(
+                provider, source_id, "pending", str(e)[:200],
+                retry_at=retry_at.isoformat(), attempts=attempts)
+
+
+def _create_and_run(store: Store, settings: Settings, llm: Any,
+                    adapters: dict[str, Any], workflow: str, task: str,
+                    ctx: dict[str, Any] | None = None) -> str:
+    run = store.create_run(workflow, WORKFLOWS[workflow].version,
+                           {"task": task}, trace_id=uuid.uuid4().hex)
+    runner = build_runner(workflow, store=store, llm=llm,
+                          settings=settings, adapters=adapters)
+    runner.invoke(run.id, {"task": task}, gmail_ctx=ctx)
+    return run.id
+
+
+def _process_due_notification_jobs(store: Store,
+                                   adapters: dict[str, Any]) -> None:
+    notifier = adapters.get("notifier")
+    if notifier is None:
+        return
+    for job in store.due_notification_jobs():
+        try:
+            # MVP: 본문은 스케줄 이벤트 제목으로 구성
+            ev_rows = store.list_scheduled_events(limit=200)
+            title = "일정 알림"
+            for ev in ev_rows:
+                if f"{ev['source_provider']}:{ev['source_id']}" == \
+                        job["scheduled_event_id"]:
+                    title = f"곧 시작: {ev['title']}"
+                    break
+            notifier.send(title=title, body="",
+                          source_url="")
+            store.mark_job(job["id"], "delivered")
+        except Exception as e:
+            store.mark_job(job["id"], "failed", str(e)[:200])
+
+
+def _maybe_poll_gmail(store: Store, settings: Settings,
+                      adapters: dict[str, Any]) -> None:
+    auto = store.get_automation()
+    if not auto.get("enabled"):
+        return
+    last = auto.get("last_gmail_poll_at")
+    if last:
+        try:
+            prev = datetime.fromisoformat(last)
+            if datetime.now(UTC) - prev < timedelta(
+                    seconds=settings.gmail_poll_interval_seconds):
+                return
+        except ValueError:
+            pass
+    gmail = adapters.get("gmail")
+    if gmail is None:
+        return
+    try:
+        ingested = _poll_gmail(store, settings, gmail)
+        auto["last_gmail_poll_at"] = datetime.now(UTC).isoformat()
+        auto["last_poll_result"] = f"ingested:{ingested}"
+        auto["last_gmail_error"] = ""
+    except Exception as e:
+        auto["last_gmail_error"] = type(e).__name__
+    store.set_automation(auto)
+
+
+def _poll_gmail(store: Store, settings: Settings,
+                gmail: Any) -> int:
+    """Gmail adapter로 새 메시지를 수신함에 적재. 반환: 신규 건수."""
+    ingested = 0
+    for ref in gmail.list_messages(settings.gmail_query, 50):
+        msg_id = ref.get("id", "")
+        if not msg_id or store.has_message("gmail", msg_id):
+            continue
+        msg = gmail.get_message(msg_id)
+        text = f"{msg.get('subject', '')}\n{msg.get('body_text', '')}"
+        if store.save_message_extraction(
+                "gmail", msg_id, msg.get("thread_id", ""), {},
+                "pending", source_text=text[:8000]):
+            ingested += 1
+    return ingested
+
+
+def _maybe_daily_radar(store: Store, settings: Settings, llm: Any,
+                       adapters: dict[str, Any]) -> None:
+    """KST 06:00 이후 최초 1회 radar 자동 수집 (자동화 플래그)."""
+    auto = store.get_automation()
+    if not auto.get("radar_enabled"):
+        return
+    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    today = now_kst.date().isoformat()
+    if now_kst.hour < 6 or auto.get("last_radar_date") == today:
+        return
+    if adapters.get("github") is None:
+        return
+    for p in settings.radar_platforms:
+        if not store.radar_snapshot_exists(p, today):
+            _create_and_run(store, settings, llm, adapters, "skill_radar",
+                            f"radar daily {p}",
+                            {"platform": p, "force": False})
+    auto["last_radar_date"] = today
+    store.set_automation(auto)
+
+
+app = create_app()

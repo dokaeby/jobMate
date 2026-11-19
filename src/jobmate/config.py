@@ -1,0 +1,83 @@
+"""환경 설정 — pydantic-settings. 비밀값은 env 이름만 참조한다."""
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .models import ModelConfig
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="JOBMATE_", env_file=".env", extra="ignore")
+
+    db_path: Path = Path("data/jobmate.db")
+    # debug: 모든 역할 gemini만. release: 가벼운 작업=gemini, 중요 작업=codex
+    mode: Literal["debug", "release"] = "debug"
+    default_model: str = "gemini-3.5-flash-lite"
+    important_model: str = "codex"
+    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    llm_api_key_env: str = "GEMINI_API_KEY"
+    codex_base_url: str = "https://chatgpt.com/backend-api/codex"
+    codex_api_key_env: str = "OPENAI_API_KEY"
+    codex_auth_path: Path = Path("~/.codex/auth.json")
+
+    # 역할별 서브모델 오버라이드: role -> "default"|"important"|ModelConfig dict는 env JSON으로
+    role_models: dict[str, str] = Field(default_factory=dict)
+
+    # 예산 기본값
+    budget_max_tokens: int = 200_000
+    budget_max_tool_calls: int = 20
+    budget_max_seconds: float = 600.0
+    budget_max_cost_usd: float = 5.0
+
+    # 자동 검사 명령 (function 단계가 실행; 빈 목록이면 diff/시크릿 검사만)
+    check_commands: list[str] = Field(default_factory=list)
+
+    # gmail-calendar/calendar-agent 어댑터 (MVP: fake 또는 파일 토큰 기반 stub)
+    gmail_token_path: Path | None = None
+    calendar_token_path: Path | None = None
+    gmail_query: str = "in:inbox newer_than:2d"
+    gmail_poll_interval_seconds: int = 30
+    worker_interval_seconds: int = 2
+    auto_register: bool = True
+    slack_signing_secret: str = ""
+    telegram_webhook_secret: str = ""
+    slack_channel_ids: str = ""
+    telegram_chat_ids: str = ""
+
+    # skillRadar 수집
+    github_token_env: str = "GITHUB_TOKEN"  # noqa: S105 - env 변수 "이름"이지 비밀값이 아님
+    radar_platforms: list[str] = Field(
+        default_factory=lambda: ["claude", "chatgpt", "gemini"])
+    radar_per_query: int = 10
+    radar_max_repos: int = 30
+    radar_queries_path: Path | None = None
+
+    def model_for(self, role: str, tier: str = "default") -> ModelConfig:
+        """역할별 오버라이드 → 티어 기본값 순으로 ModelConfig를 만든다.
+        debug 모드에서는 tier와 무관하게 항상 default(gemini)만 사용한다."""
+        if self.mode == "debug":
+            tier = "default"
+        override = self.role_models.get(role)
+        if override == "important":
+            return ModelConfig(model=self.important_model, base_url=self.codex_base_url,
+                               api_key_env=self.codex_api_key_env,
+                               provider="codex")
+        if override == "default":
+            return ModelConfig(model=self.default_model, base_url=self.llm_base_url,
+                               api_key_env=self.llm_api_key_env)
+        if tier == "important":
+            return ModelConfig(model=self.important_model, base_url=self.codex_base_url,
+                               api_key_env=self.codex_api_key_env,
+                               provider="codex")
+        return ModelConfig(model=self.default_model, base_url=self.llm_base_url,
+                           api_key_env=self.llm_api_key_env)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

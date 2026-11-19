@@ -1,0 +1,45 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 비밀값·자격증명 — 절대 커밋 금지
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+token*.json
+*token*.json
+*secret*
+*credential*
+auth.json
+service-account*.json
+
+# 로컬 데이터·DB
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+*.sqlite*
+
+# OS/에디터
+.DS_Store
+.idea/
+.vscode/
+.serena/
+
+# 도구 산출물
+graphify-out/
+node_modules/
+
+# 로그
+*.log
+logs/
