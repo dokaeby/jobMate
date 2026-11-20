@@ -85,6 +85,37 @@ class EventReviewRequest(BaseModel):
     location: str | None = None
 
 
+def _token_path_for(kind: str, settings: Settings) -> str | None:
+    """Google 토큰 파일 경로 해석.
+
+    서버리스(Vercel)에는 토큰 파일이 없으므로 JOBMATE_{KIND}_TOKEN_JSON env의
+    토큰 JSON을 임시 파일(0600)로 materialize한다. 로컬은 설정된 경로가
+    실제 존재할 때만 사용 — 경로만 있고 파일이 없으면 어댑터 생성을 건너뛴다.
+    """
+    import tempfile
+
+    env_json = os.environ.get(f"JOBMATE_{kind.upper()}_TOKEN_JSON", "")
+    if env_json:
+        try:
+            json.loads(env_json)
+        except ValueError:
+            logger.warning("%s token json env is invalid JSON — adapter disabled", kind)
+        else:
+            fd, path = tempfile.mkstemp(prefix=f"jobmate-{kind}-token-", suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                f.write(env_json)
+            os.chmod(path, 0o600)
+            logger.info("%s token materialized from env to temp file", kind)
+            return path
+    configured = getattr(settings, f"{kind}_token_path", None)
+    if configured:
+        p = Path(configured).expanduser()
+        if p.is_file():
+            return str(p)
+        logger.warning("%s token path configured but file missing: %s", kind, p)
+    return None
+
+
 def _default_adapters(settings: Settings, store: Store) -> dict[str, Any]:
     from ..adapters.google import GoogleCalendar, GoogleGmail
 
@@ -97,11 +128,13 @@ def _default_adapters(settings: Settings, store: Store) -> dict[str, Any]:
             subject=os.environ.get("VAPID_SUBJECT", "mailto:admin@localhost"),
         ),
     }
-    # 실제 Google 연동 — 토큰 파일 경로가 설정된 경우에만 주입
-    if settings.gmail_token_path:
-        adapters["gmail"] = GoogleGmail(settings.gmail_token_path)
-    if settings.calendar_token_path:
-        adapters["calendar"] = GoogleCalendar(settings.calendar_token_path)
+    # 실제 Google 연동 — 토큰 파일/env JSON이 확인된 경우에만 주입
+    gmail_path = _token_path_for("gmail", settings)
+    if gmail_path:
+        adapters["gmail"] = GoogleGmail(gmail_path)
+    cal_path = _token_path_for("calendar", settings)
+    if cal_path:
+        adapters["calendar"] = GoogleCalendar(cal_path)
     return adapters
 
 
@@ -123,6 +156,15 @@ def create_app(
                 "postgres" if settings.database_url else settings.db_path,
             )
             raise
+    if os.environ.get("VERCEL") and not (
+        settings.database_url
+        or os.environ.get("POSTGRES_URL")
+        or os.environ.get("POSTGRES_PRISMA_URL")
+    ):
+        logger.warning(
+            "VERCEL without postgres DSN — sqlite db is ephemeral per-invocation; "
+            "set JOBMATE_DATABASE_URL or POSTGRES_URL"
+        )
     llm = llm or CompositeLLM()
     adapters = adapters if adapters is not None else _default_adapters(settings, store)
     stop_event = threading.Event()
@@ -167,7 +209,7 @@ def create_app(
         path = request.url.path
         # API 키 인증: /api/* 전체. health 체크와 외부 webhook(자체 서명 검증)은 제외
         if path.startswith("/api/") and not path.startswith(
-            ("/api/v1/health", "/api/v1/webhooks/")
+            ("/api/v1/health", "/api/v1/webhooks/", "/api/v1/cron/tick")
         ):
             if not authorized(request):
                 logger.warning("api auth failed: %s", path)
@@ -458,8 +500,10 @@ def create_app(
     def cron_tick(request: Request) -> JSONResponse:
         """서버리스 환경용 1회 자동화 사이클 (Vercel Cron 등에서 호출)."""
         secret = os.environ.get("CRON_SECRET") or os.environ.get("JOBMATE_CRON_SECRET", "")
-        if os.environ.get("VERCEL") and secret:
-            if request.headers.get("authorization") != f"Bearer {secret}":
+        if os.environ.get("VERCEL"):
+            # Vercel Cron은 CRON_SECRET env가 있으면 Bearer를 자동 부착.
+            # 서버리스에서는 secret 미설정 시에도 외부 호출을 허용하지 않는다.
+            if not secret or request.headers.get("authorization") != f"Bearer {secret}":
                 logger.warning("cron tick rejected: invalid secret")
                 return err(401, "unauthorized", "invalid cron secret", request)
         _process_pending_messages(store, settings, llm, adapters)
@@ -473,10 +517,15 @@ def create_app(
         secret = os.environ.get("CRON_SECRET") or os.environ.get("JOBMATE_CRON_SECRET", "")
         if not secret:
             return True
-        return (
+        if (
             request.headers.get("authorization") == f"Bearer {secret}"
             or request.query_params.get("secret") == secret
-        )
+        ):
+            return True
+        # cron-job.org 등 API 키 인증 경로 — 미들웨어에서 이미 검증된 키만 도달
+        from ..security import authorized
+
+        return bool(os.environ.get("JOBMATE_API_KEY")) and authorized(request)
 
     def _summarize_email(msg: dict[str, Any]) -> str:
         body = (msg.get("body_text") or "").strip()
@@ -661,7 +710,21 @@ def create_app(
             task=task,
             workspace=body.workspace,
         )
-        # 즉시 claim 시도 — 실패(중복 등)하면 디스패처가 due 시점에 회수
+        # 즉시 claim 시도 — 실패(중복 등)하면 디스패처가 due 시점에 회수.
+        # 서버리스에는 상주 워커가 없으므로 queued로 두고 외부 워커에 위임한다.
+        if os.environ.get("VERCEL"):
+            logger.warning(
+                "coding job %s queued on serverless — run `jobmate coding-worker` "
+                "on an external host to execute it",
+                job_id,
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "job_id": job_id,
+                    "warning": "serverless: job queued for external coding-worker",
+                },
+            )
         coding_worker.submit(job_id)
         return JSONResponse(status_code=202, content={"job_id": job_id})
 
@@ -953,6 +1016,10 @@ def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> di
 
     api_key = os.environ.get(settings.cronjob_api_key_env, "")
     out: dict[str, str] = {}
+    # 공개 URL: 명시 설정 → Vercel 배포 URL 순. 둘 다 없으면 자동 생성 불가.
+    public_base = settings.public_base_url or (
+        f"https://{os.environ['VERCEL_URL']}" if os.environ.get("VERCEL_URL") else ""
+    )
 
     def ensure_job(
         job_id: str,
@@ -966,7 +1033,7 @@ def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> di
         """job id 확보(기존 → env → 자동 생성) 후 스케줄 갱신."""
         job_id = job_id or str(prefs.get(pref_key) or "")
         if not job_id:
-            if not api_key or not settings.public_base_url:
+            if not api_key or not public_base:
                 out[label] = "skipped(no job id)"
                 return ""
             try:
@@ -979,7 +1046,7 @@ def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> di
                         api_key,
                         base_url=settings.cronjob_base_url,
                         title=title,
-                        url=settings.public_base_url.rstrip("/") + path,
+                        url=public_base.rstrip("/") + path,
                         schedule=schedule,
                         headers=headers,
                         body=body,

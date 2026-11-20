@@ -142,13 +142,18 @@ def configure_langsmith(settings: Settings) -> bool:
 
 
 def database_dsn(settings: Settings) -> str:
-    """Store에 넘길 DSN/경로. Vercel Postgres(POSTGRES_URL)도 인식."""
-    return (
+    """Store에 넘길 DSN/경로. Vercel Postgres(POSTGRES_URL)도 인식.
+    Vercel에서 postgres DSN이 없으면 /tmp(인스턴스 임시)를 사용한다."""
+    dsn = (
         settings.database_url
         or os.environ.get("POSTGRES_URL", "")
         or os.environ.get("POSTGRES_PRISMA_URL", "")
-        or str(settings.db_path)
     )
+    if dsn:
+        return dsn
+    if os.environ.get("VERCEL"):
+        return "/tmp/jobmate.db"  # noqa: S108 - Vercel 런타임의 유일한 쓰기 가능 임시 경로
+    return str(settings.db_path)
 
 
 @lru_cache

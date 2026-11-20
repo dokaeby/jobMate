@@ -463,3 +463,54 @@ def test_settings_cronjob_autocreate(monkeypatch):
     assert cj2["email"] == "updated" and cj2["radar"] == "updated"
     assert len(created) == 2
     assert patched == ["778", "779", "778", "779"]
+
+
+def test_token_path_for_env_json(monkeypatch, tmp_path):
+    """JOBMATE_*_TOKEN_JSON env → 임시 토큰 파일 materialize."""
+    import json as _json
+
+    from jobmate.api.app import _token_path_for
+
+    token = {"client_id": "c", "client_secret": "s", "refresh_token": "r"}
+    monkeypatch.setenv("JOBMATE_GMAIL_TOKEN_JSON", _json.dumps(token))
+    settings = Settings(db_path=tmp_path / "t.db", gmail_token_path=None, calendar_token_path=None)
+    path = _token_path_for("gmail", settings)
+    assert path and _json.loads(open(path).read()) == token
+    import os
+    import stat
+
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    # 잘못된 JSON이면 None
+    monkeypatch.setenv("JOBMATE_CALENDAR_TOKEN_JSON", "{bad")
+    assert _token_path_for("calendar", settings) is None
+
+
+def test_coding_run_serverless_queues(monkeypatch):
+    """VERCEL 환경에서는 coding job을 실행하지 않고 queued + warning 반환."""
+    monkeypatch.setenv("VERCEL", "1")
+    client, store = _client()
+    r = client.post(
+        "/api/v1/coding/run",
+        json={"engine": "agent", "task": "do something"},
+    )
+    assert r.status_code == 202
+    d = r.json()
+    assert d["job_id"]
+    assert "warning" in d
+    job = store.get_coding_job(d["job_id"])
+    assert job["status"] == "queued"
+
+
+def test_cron_tick_vercel_requires_secret(monkeypatch):
+    """VERCEL에서 cron tick은 CRON_SECRET Bearer 없이는 401."""
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("CRON_SECRET", "s3cret")
+    client, _ = _client()
+    r = client.get("/api/v1/cron/tick")
+    assert r.status_code == 401
+    r2 = client.get("/api/v1/cron/tick", headers={"Authorization": "Bearer s3cret"})
+    assert r2.status_code == 200
+    # API 키 미들웨어 예외 경로 — JOBMATE_API_KEY 없어도 tick은 secret만 검사
+    monkeypatch.setenv("JOBMATE_API_KEY", "apikey123")
+    r3 = client.get("/api/v1/cron/tick", headers={"Authorization": "Bearer s3cret"})
+    assert r3.status_code == 200
