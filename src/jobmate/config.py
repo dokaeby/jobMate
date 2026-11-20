@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     coding_workspace: str = ""  # 비우면 data/workspaces/<run_id>에 git repo 생성
     coding_timeout_seconds: float = 600.0
 
+    # LangSmith 관측성 — API 키가 있으면 LangGraph/LangSmith 트레이싱 활성화
+    langsmith_tracing: bool = True
+    langsmith_api_key_env: str = "LANGSMITH_API_KEY"
+    langsmith_project: str = "jobmate"
+
     def model_for(self, role: str, tier: str = "default") -> ModelConfig:
         """역할별 오버라이드 → 티어 기본값 순으로 ModelConfig를 만든다.
         debug 모드에서는 tier와 무관하게 항상 default(gemini)만 사용한다."""
@@ -96,6 +101,19 @@ class Settings(BaseSettings):
         return ModelConfig(
             model=self.default_model, base_url=self.llm_base_url, api_key_env=self.llm_api_key_env
         )
+
+
+def configure_langsmith(settings: Settings) -> bool:
+    """LangSmith 트레이싱 env를 설정. API 키가 없거나 tracing=False면 False."""
+    if not settings.langsmith_tracing:
+        return False
+    api_key = os.environ.get(settings.langsmith_api_key_env, "")
+    if not api_key:
+        return False
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_API_KEY", api_key)
+    os.environ.setdefault("LANGCHAIN_PROJECT", settings.langsmith_project)
+    return True
 
 
 def database_dsn(settings: Settings) -> str:

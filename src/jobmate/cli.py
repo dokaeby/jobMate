@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from .config import database_dsn, get_settings
+from .config import configure_langsmith, database_dsn, get_settings
 from .llm import CompositeLLM
 from .models import RunStatus
 from .store.db import Store
@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     settings = get_settings()
+    configure_langsmith(settings)
     store = Store(database_dsn(settings))
     llm = CompositeLLM()
 

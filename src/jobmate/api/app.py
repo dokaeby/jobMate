@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..adapters import LoggingNotifier, WebPushNotifier
-from ..config import Settings, database_dsn, get_settings
+from ..config import Settings, configure_langsmith, database_dsn, get_settings
 from ..llm import CompositeLLM
 from ..models import RunStatus
 from ..radar import GitHubAPI
@@ -76,6 +76,7 @@ def create_app(
     adapters: dict[str, Any] | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    configure_langsmith(settings)
     store = store or Store(database_dsn(settings))
     llm = llm or CompositeLLM()
     adapters = adapters if adapters is not None else _default_adapters(settings, store)

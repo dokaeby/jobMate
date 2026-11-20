@@ -5,6 +5,7 @@
 토큰이 만료되면 auth.openai.com/oauth/token으로 갱신을 시도하고,
 실패하면 `codex login` 안내 오류를 발생시킨다.
 """
+
 from __future__ import annotations
 
 import base64
@@ -39,8 +40,8 @@ class CodexAuth:
                 self._data = json.loads(self._path.read_text())
             except (OSError, json.JSONDecodeError) as e:
                 raise LLMError(
-                    f"codex auth not readable at {self._path}: {e}. "
-                    "Run `codex login` first.") from e
+                    f"codex auth not readable at {self._path}: {e}. Run `codex login` first."
+                ) from e
         return self._data
 
     @staticmethod
@@ -57,14 +58,17 @@ class CodexAuth:
         refresh_token = tokens.get("refresh_token")
         if not refresh_token:
             raise LLMError("codex refresh_token missing; run `codex login`")
-        resp = httpx.post(OAUTH_ENDPOINT, json={
-            "client_id": CODEX_CLIENT_ID,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }, timeout=30)
+        resp = httpx.post(
+            OAUTH_ENDPOINT,
+            json={
+                "client_id": CODEX_CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            timeout=30,
+        )
         if resp.status_code != 200:
-            raise LLMError(
-                f"codex token refresh failed ({resp.status_code}); run `codex login`")
+            raise LLMError(f"codex token refresh failed ({resp.status_code}); run `codex login`")
         new = resp.json()
         tokens["access_token"] = new["access_token"]
         if new.get("id_token"):
@@ -107,20 +111,28 @@ def iter_sse_data(lines: Any) -> Any:
 class CodexResponsesLLM:
     """Codex 구독 Responses API. LLMClient 프로토콜 구현."""
 
-    def __init__(self, auth_path: Path | None = None,
-                 max_retries: int = 2, backoff: float = 1.0) -> None:
-        self._auth = CodexAuth(auth_path or Path(
-            os.environ.get("JOBMATE_CODEX_AUTH_PATH", "~/.codex/auth.json")))
+    def __init__(
+        self, auth_path: Path | None = None, max_retries: int = 2, backoff: float = 1.0
+    ) -> None:
+        self._auth = CodexAuth(
+            auth_path or Path(os.environ.get("JOBMATE_CODEX_AUTH_PATH", "~/.codex/auth.json"))
+        )
         self._max_retries = max_retries
         self._backoff = backoff
 
-    def complete(self, *, model: ModelConfig, system: str, user: str,
-                 schema: type[T] | None = None) -> tuple[Any, dict[str, int]]:
+    def complete(
+        self, *, model: ModelConfig, system: str, user: str, schema: type[T] | None = None
+    ) -> tuple[Any, dict[str, int]]:
         payload: dict[str, Any] = {
             "model": model.model,
             "instructions": system,
-            "input": [{"type": "message", "role": "user", "content": [
-                {"type": "input_text", "text": user}]}],
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": user}],
+                }
+            ],
             "store": False,
             "stream": True,
             "max_output_tokens": model.max_tokens,
@@ -136,27 +148,25 @@ class CodexResponsesLLM:
                     return extract_json(text), usage
                 except ValueError:
                     return text, usage
-            except (httpx.HTTPError, KeyError, IndexError, ValueError,
-                    ValidationError) as e:
+            except (httpx.HTTPError, KeyError, IndexError, ValueError, ValidationError) as e:
                 last_err = e
                 if attempt < self._max_retries:
-                    time.sleep(self._backoff * (2 ** attempt))
+                    time.sleep(self._backoff * (2**attempt))
                     continue
-                raise LLMError(
-                    f"codex llm call failed after {attempt + 1} attempts: {e}") from e
+                raise LLMError(f"codex llm call failed after {attempt + 1} attempts: {e}") from e
         raise LLMError(f"codex llm call failed: {last_err}")
 
-    def _stream(self, url: str, payload: dict[str, Any],
-                model: ModelConfig) -> tuple[str, dict[str, int]]:
+    def _stream(
+        self, url: str, payload: dict[str, Any], model: ModelConfig
+    ) -> tuple[str, dict[str, int]]:
         parts: list[str] = []
         usage = {"tokens_in": 0, "tokens_out": 0}
         with httpx.Client(timeout=model.timeout_seconds) as client:
-            with client.stream("POST", url, headers=self._auth.headers(),
-                               json=payload) as resp:
+            with client.stream("POST", url, headers=self._auth.headers(), json=payload) as resp:
                 if resp.status_code in (429, 500, 502, 503, 504):
                     raise httpx.HTTPStatusError(
-                        f"retryable {resp.status_code}", request=resp.request,
-                        response=resp)
+                        f"retryable {resp.status_code}", request=resp.request, response=resp
+                    )
                 resp.raise_for_status()
                 for ev in iter_sse_data(resp.iter_lines()):
                     etype = ev.get("type", "")
@@ -164,11 +174,12 @@ class CodexResponsesLLM:
                         parts.append(ev.get("delta", ""))
                     elif etype == "response.completed":
                         u = (ev.get("response") or {}).get("usage") or {}
-                        usage = {"tokens_in": u.get("input_tokens", 0),
-                                 "tokens_out": u.get("output_tokens", 0)}
+                        usage = {
+                            "tokens_in": u.get("input_tokens", 0),
+                            "tokens_out": u.get("output_tokens", 0),
+                        }
                     elif etype in ("response.failed", "error"):
-                        raise LLMError(
-                            f"codex stream error: {json.dumps(ev)[:300]}")
+                        raise LLMError(f"codex stream error: {json.dumps(ev)[:300]}")
         return "".join(parts), usage
 
 
@@ -177,11 +188,33 @@ class CompositeLLM:
 
     def __init__(self, compat: Any | None = None, codex: Any | None = None) -> None:
         from .client import OpenAICompatLLM
+
         self._compat = compat or OpenAICompatLLM()
         self._codex = codex or CodexResponsesLLM()
+        self._impl = self._maybe_traced()
 
-    def complete(self, *, model: ModelConfig, system: str, user: str,
-                 schema: type[T] | None = None) -> tuple[Any, dict[str, int]]:
+    @staticmethod
+    def _tracing_enabled() -> bool:
+        return os.environ.get("LANGCHAIN_TRACING_V2") == "true" and bool(
+            os.environ.get("LANGCHAIN_API_KEY")
+        )
+
+    def _maybe_traced(self) -> Any:
+        if not self._tracing_enabled():
+            return self._complete
+        try:
+            from langsmith import traceable
+        except ImportError:
+            return self._complete
+        return traceable(name="jobmate.llm.complete", run_type="llm")(self._complete)
+
+    def complete(
+        self, *, model: ModelConfig, system: str, user: str, schema: type[T] | None = None
+    ) -> tuple[Any, dict[str, int]]:
+        return self._impl(model=model, system=system, user=user, schema=schema)
+
+    def _complete(
+        self, *, model: ModelConfig, system: str, user: str, schema: type[T] | None = None
+    ) -> tuple[Any, dict[str, int]]:
         client = self._codex if model.provider == "codex" else self._compat
-        return client.complete(model=model, system=system, user=user,
-                               schema=schema)
+        return client.complete(model=model, system=system, user=user, schema=schema)
