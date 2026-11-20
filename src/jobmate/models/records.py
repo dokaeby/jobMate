@@ -1,4 +1,5 @@
 """영속 레코드 모델 — store 경계."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -52,8 +53,8 @@ class Approval(BaseModel):
 class AuditEvent(BaseModel):
     id: str
     run_id: str
-    actor: str            # system|agent:<role>|human|tool
-    action: str           # stage_start|verdict|branch|approval|external_write|error ...
+    actor: str  # system|agent:<role>|human|tool
+    action: str  # stage_start|verdict|branch|approval|external_write|error ...
     object_ref: str = ""
     detail: dict[str, Any] = Field(default_factory=dict)  # 본문/토큰 금지
     created_at: datetime
@@ -63,7 +64,7 @@ class EventLink(BaseModel):
     """gmail_calendar 워크플로의 메시지↔이벤트 멱등 링크."""
 
     id: str
-    idempotency_key: str          # UNIQUE
+    idempotency_key: str  # UNIQUE
     gmail_message_id: str
     connection_id: str = "default"
     status: LinkStatus = LinkStatus.DISCOVERED

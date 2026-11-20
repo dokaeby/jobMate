@@ -5,6 +5,7 @@
 
 발급은 `jobmate google-auth gmail|calendar` CLI로 수행한다.
 """
+
 from __future__ import annotations
 
 import base64
@@ -40,8 +41,7 @@ class GoogleAuthError(Exception):
 class _GoogleAuth:
     """토큰 파일 기반 인증 — access token은 만료 전까지 메모리 캐시."""
 
-    def __init__(self, token_path: str | Path,
-                 client: httpx.Client | None = None) -> None:
+    def __init__(self, token_path: str | Path, client: httpx.Client | None = None) -> None:
         data = json.loads(Path(token_path).expanduser().read_text())
         self._client_id = data["client_id"]
         self._client_secret = data["client_secret"]
@@ -53,15 +53,17 @@ class _GoogleAuth:
     def _refresh(self) -> None:
         if not self._refresh_token:
             raise GoogleAuthError("refresh_token missing in token file")
-        r = self._client.post(TOKEN_URI, data={
-            "client_id": self._client_id,
-            "client_secret": self._client_secret,
-            "refresh_token": self._refresh_token,
-            "grant_type": "refresh_token",
-        })
+        r = self._client.post(
+            TOKEN_URI,
+            data={
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
+                "refresh_token": self._refresh_token,
+                "grant_type": "refresh_token",
+            },
+        )
         if r.status_code != 200:
-            raise GoogleAuthError(
-                f"token refresh failed: {r.status_code} {r.text[:200]}")
+            raise GoogleAuthError(f"token refresh failed: {r.status_code} {r.text[:200]}")
         body = r.json()
         self._access_token = body["access_token"]
         self._expires_at = time.time() + float(body.get("expires_in", 3600))
@@ -74,12 +76,11 @@ class _GoogleAuth:
 
 def _b64url_decode(data: str) -> str:
     pad = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + pad).decode(
-        "utf-8", errors="replace")
+    return base64.urlsafe_b64decode(data + pad).decode("utf-8", errors="replace")
 
 
 def _header(payload: dict[str, Any], name: str) -> str:
-    for h in (payload.get("headers") or []):
+    for h in payload.get("headers") or []:
         if h.get("name", "").lower() == name.lower():
             return h.get("value", "")
     return ""
@@ -100,15 +101,11 @@ def _decode_header(value: str) -> str:
         for charset, enc, text in decoded_parts:
             try:
                 if enc.lower() == "b":
-                    decoded_bytes = base64.urlsafe_b64decode(
-                        text + "=" * (-len(text) % 4))
-                    result.append(
-                        decoded_bytes.decode(charset, errors="replace"))
+                    decoded_bytes = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+                    result.append(decoded_bytes.decode(charset, errors="replace"))
                 elif enc.lower() == "q":
                     normalized = text.replace("_", " ")
-                    result.append(
-                        normalized.encode("latin-1").decode(
-                            charset, errors="replace"))
+                    result.append(normalized.encode("latin-1").decode(charset, errors="replace"))
             except Exception:
                 logger.warning("RFC 2047 decode failed (charset=%s)", charset)
                 continue
@@ -126,11 +123,16 @@ def _strip_html(text: str) -> str:
     if not text:
         return ""
     try:
-        text = re.sub(r"<\s*/?\s*(br|p|tr|td)\s*>", "\n", text,
-                      flags=re.IGNORECASE)
+        text = re.sub(r"<\s*/?\s*(br|p|tr|td)\s*>", "\n", text, flags=re.IGNORECASE)
         text = re.sub(r"<[^>]+>", " ", text)
-        for a, b in (("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
-                     ("&quot;", '"'), ("&#39;", "'"), ("&nbsp;", " ")):
+        for a, b in (
+            ("&amp;", "&"),
+            ("&lt;", "<"),
+            ("&gt;", ">"),
+            ("&quot;", '"'),
+            ("&#39;", "'"),
+            ("&nbsp;", " "),
+        ):
             text = text.replace(a, b)
         text = re.sub(r"[\r\n]+", "\n", text)
         text = re.sub(r" {3,}", " ", text)
@@ -177,17 +179,16 @@ class GoogleGmail:
 
     name = "gmail"
 
-    def __init__(self, token_path: str | Path,
-                 client: httpx.Client | None = None) -> None:
+    def __init__(self, token_path: str | Path, client: httpx.Client | None = None) -> None:
         self._auth = _GoogleAuth(token_path, client)
         self._client = self._auth._client
 
-    def list_messages(self, query: str = "",
-                      max_results: int = 10) -> list[dict[str, Any]]:
+    def list_messages(self, query: str = "", max_results: int = 10) -> list[dict[str, Any]]:
         r = self._client.get(
             f"{GMAIL_API}/messages",
             params={"q": query, "maxResults": max_results},
-            headers=self._auth.headers())
+            headers=self._auth.headers(),
+        )
         r.raise_for_status()
         return [{"id": m["id"]} for m in r.json().get("messages", [])]
 
@@ -195,7 +196,8 @@ class GoogleGmail:
         r = self._client.get(
             f"{GMAIL_API}/messages/{message_id}",
             params={"format": "full"},
-            headers=self._auth.headers())
+            headers=self._auth.headers(),
+        )
         r.raise_for_status()
         msg = r.json()
         payload = msg.get("payload") or {}
@@ -219,14 +221,21 @@ class GoogleCalendar:
     name = "calendar"
     MARKER_KEY = "jobmate_marker"
 
-    def __init__(self, token_path: str | Path,
-                 client: httpx.Client | None = None) -> None:
+    def __init__(self, token_path: str | Path, client: httpx.Client | None = None) -> None:
         self._auth = _GoogleAuth(token_path, client)
         self._client = self._auth._client
 
-    def _event_body(self, *, title: str, start_at: str, end_at: str,
-                    timezone: str, location: str, marker: str,
-                    event_id: str | None = None) -> dict[str, Any]:
+    def _event_body(
+        self,
+        *,
+        title: str,
+        start_at: str,
+        end_at: str,
+        timezone: str,
+        location: str,
+        marker: str,
+        event_id: str | None = None,
+    ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "summary": title,
             "location": location,
@@ -236,25 +245,43 @@ class GoogleCalendar:
         }
         return body
 
-    def create_event(self, *, title: str, start_at: str, end_at: str,
-                     timezone: str, location: str, marker: str,
-                     event_id: str | None = None) -> str:
+    def create_event(
+        self,
+        *,
+        title: str,
+        start_at: str,
+        end_at: str,
+        timezone: str,
+        location: str,
+        marker: str,
+        event_id: str | None = None,
+    ) -> str:
         r = self._client.post(
             f"{CALENDAR_API}/events",
             params={"sendUpdates": "none"},
-            json=self._event_body(title=title, start_at=start_at,
-                                  end_at=end_at, timezone=timezone,
-                                  location=location, marker=marker),
-            headers=self._auth.headers())
+            json=self._event_body(
+                title=title,
+                start_at=start_at,
+                end_at=end_at,
+                timezone=timezone,
+                location=location,
+                marker=marker,
+            ),
+            headers=self._auth.headers(),
+        )
         r.raise_for_status()
         return r.json()["id"]
 
     def find_by_marker(self, marker: str) -> str | None:
         r = self._client.get(
             f"{CALENDAR_API}/events",
-            params={"privateExtendedProperty": f"{self.MARKER_KEY}={marker}",
-                    "singleEvents": "true", "maxResults": 1},
-            headers=self._auth.headers())
+            params={
+                "privateExtendedProperty": f"{self.MARKER_KEY}={marker}",
+                "singleEvents": "true",
+                "maxResults": 1,
+            },
+            headers=self._auth.headers(),
+        )
         r.raise_for_status()
         items = r.json().get("items", [])
         return items[0]["id"] if items else None
@@ -265,48 +292,60 @@ class GoogleCalendar:
         page_token = ""
         while True:
             params: dict[str, Any] = {
-                "timeMin": start_at, "timeMax": end_at,
-                "singleEvents": "true", "showDeleted": "false",
-                "maxResults": 250, "orderBy": "startTime"}
+                "timeMin": start_at,
+                "timeMax": end_at,
+                "singleEvents": "true",
+                "showDeleted": "false",
+                "maxResults": 250,
+                "orderBy": "startTime",
+            }
             if page_token:
                 params["pageToken"] = page_token
-            r = self._client.get(f"{CALENDAR_API}/events", params=params,
-                                 headers=self._auth.headers())
+            r = self._client.get(
+                f"{CALENDAR_API}/events", params=params, headers=self._auth.headers()
+            )
             r.raise_for_status()
             body = r.json()
             for ev in body.get("items", []):
-                marker = (ev.get("extendedProperties") or {}).get(
-                    "private", {}).get(self.MARKER_KEY, "")
-                out.append({
-                    "id": ev.get("id", ""),
-                    "summary": ev.get("summary", ""),
-                    "status": ev.get("status", "confirmed"),
-                    "transparency": ev.get("transparency", "opaque"),
-                    "start": ev.get("start") or {},
-                    "end": ev.get("end") or {},
-                    "marker": marker,
-                })
+                marker = (
+                    (ev.get("extendedProperties") or {}).get("private", {}).get(self.MARKER_KEY, "")
+                )
+                out.append(
+                    {
+                        "id": ev.get("id", ""),
+                        "summary": ev.get("summary", ""),
+                        "status": ev.get("status", "confirmed"),
+                        "transparency": ev.get("transparency", "opaque"),
+                        "start": ev.get("start") or {},
+                        "end": ev.get("end") or {},
+                        "marker": marker,
+                    }
+                )
             page_token = body.get("nextPageToken", "")
             if not page_token:
                 return out
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
-        r = self._client.get(f"{CALENDAR_API}/events/{event_id}",
-                             headers=self._auth.headers())
+        r = self._client.get(f"{CALENDAR_API}/events/{event_id}", headers=self._auth.headers())
         if r.status_code == 404:
             return None
         r.raise_for_status()
         ev = r.json()
-        return {"id": ev.get("id"), "summary": ev.get("summary", ""),
-                "status": ev.get("status", "confirmed"),
-                "start": ev.get("start") or {},
-                "end": ev.get("end") or {}}
+        return {
+            "id": ev.get("id"),
+            "summary": ev.get("summary", ""),
+            "status": ev.get("status", "confirmed"),
+            "start": ev.get("start") or {},
+            "end": ev.get("end") or {},
+        }
 
 
 # ---------- OAuth 토큰 발급 (로컬 1회성 플로우) ----------
 
-def issue_token(kind: str, *, client_id: str, client_secret: str,
-                token_path: str | Path, timeout: float = 300.0) -> Path:
+
+def issue_token(
+    kind: str, *, client_id: str, client_secret: str, token_path: str | Path, timeout: float = 300.0
+) -> Path:
     """loopback redirect로 auth code를 받아 refresh token을 저장한다.
 
     calendar-agent scripts/authorize.py와 동일한 플로우 + state 검증.
@@ -319,15 +358,13 @@ def issue_token(kind: str, *, client_id: str, client_secret: str,
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
-            qs = urllib.parse.parse_qs(
-                urllib.parse.urlparse(self.path).query)
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if "code" in qs:
                 result["code"] = qs["code"][0]
                 result["state"] = qs.get("state", [""])[0]
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(
-                    "jobMate 인증 완료 — 이 창을 닫아도 됩니다.".encode())
+                self.wfile.write("jobMate 인증 완료 — 이 창을 닫아도 됩니다.".encode())
             else:
                 result["error"] = qs.get("error", ["unknown"])[0]
                 self.send_response(400)
@@ -362,31 +399,37 @@ def issue_token(kind: str, *, client_id: str, client_secret: str,
         raise GoogleAuthError("oauth state mismatch")
 
     with httpx.Client(timeout=30) as client:
-        r = client.post(TOKEN_URI, data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": result["code"],
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-        })
+        r = client.post(
+            TOKEN_URI,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": result["code"],
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+        )
     if r.status_code != 200:
-        raise GoogleAuthError(
-            f"code exchange failed: {r.status_code} {r.text[:200]}")
+        raise GoogleAuthError(f"code exchange failed: {r.status_code} {r.text[:200]}")
     body = r.json()
     if "refresh_token" not in body:
-        raise GoogleAuthError(
-            "refresh_token not returned — prompt=consent 필요")
+        raise GoogleAuthError("refresh_token not returned — prompt=consent 필요")
     path = Path(token_path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     # google-auth Credentials.to_json()과 동일 필드를 포함해
     # calendar-agent의 token_*.json도 그대로 읽을 수 있게 한다
-    path.write_text(json.dumps({
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": body["refresh_token"],
-        "token_uri": TOKEN_URI,
-        "scopes": scopes,
-    }, indent=2))
+    path.write_text(
+        json.dumps(
+            {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": body["refresh_token"],
+                "token_uri": TOKEN_URI,
+                "scopes": scopes,
+            },
+            indent=2,
+        )
+    )
     path.chmod(0o600)
     return path
 

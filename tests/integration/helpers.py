@@ -1,4 +1,5 @@
 """통합 테스트 공통 헬퍼."""
+
 from __future__ import annotations
 
 import tempfile
@@ -28,6 +29,7 @@ def make_env(**settings_kw: Any):
 def scripted_llm(script: dict[str, Any]):
     """schema 이름별 응답 큐. 값은 단일 응답 또는 리스트. 큐가 비면 마지막 반복."""
     from pydantic import BaseModel
+
     queues = {}
     for k, v in script.items():
         if isinstance(v, list):
@@ -62,8 +64,7 @@ VALID_DIFF = (
 def default_outputs(**over):
     out = {
         "AnalysisResult": AnalysisResult(requirements="req", scope="scope"),
-        "ChangeProposal": ChangeProposal(
-            summary="impl", diff=VALID_DIFF),
+        "ChangeProposal": ChangeProposal(summary="impl", diff=VALID_DIFF),
         "Verdict": Verdict(decision="approve", findings=[], summary="ok"),
         "QaVerdict": QaVerdict(decision="pass", rationale="all good"),
     }
@@ -72,8 +73,7 @@ def default_outputs(**over):
 
 
 def run_dev_review(store, settings, llm, task="fix bug"):
-    run = store.create_run("dev_review", "0.1.0", {"task": task},
-                           trace_id="test")
+    run = store.create_run("dev_review", "0.1.0", {"task": task}, trace_id="test")
     runner = build_runner("dev_review", store=store, llm=llm, settings=settings)
     state = runner.invoke(run.id, {"task": task})
     return run.id, runner, state

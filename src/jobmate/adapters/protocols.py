@@ -1,4 +1,5 @@
 """외부 어댑터 Protocol — fake/real 모두 동일 계약."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -10,9 +11,17 @@ class GmailClient(Protocol):
 
 
 class CalendarClient(Protocol):
-    def create_event(self, *, title: str, start_at: str, end_at: str,
-                     timezone: str, location: str, marker: str,
-                     event_id: str | None = None) -> str: ...
+    def create_event(
+        self,
+        *,
+        title: str,
+        start_at: str,
+        end_at: str,
+        timezone: str,
+        location: str,
+        marker: str,
+        event_id: str | None = None,
+    ) -> str: ...
     def find_by_marker(self, marker: str) -> str | None: ...
     def search_events(self, start_at: str, end_at: str) -> list[dict[str, Any]]: ...
     def get_event(self, event_id: str) -> dict[str, Any] | None: ...

@@ -1,4 +1,5 @@
 """LLM 클라이언트 — OpenAI 호환 chat/completions + fake 주입."""
+
 from __future__ import annotations
 
 import json
@@ -22,9 +23,9 @@ class LLMError(Exception):
 class LLMClient(Protocol):
     """모든 LLM 호출의 경계. fake 구현이 동일 계약을 따른다."""
 
-    def complete(self, *, model: ModelConfig, system: str, user: str,
-                 schema: type[T] | None = None) -> tuple[T | dict[str, Any] | str,
-                                                    dict[str, int]]:
+    def complete(
+        self, *, model: ModelConfig, system: str, user: str, schema: type[T] | None = None
+    ) -> tuple[T | dict[str, Any] | str, dict[str, int]]:
         """반환: (파싱된 출력, usage{tokens_in,tokens_out})."""
         ...
 
@@ -40,7 +41,7 @@ def extract_json(text: str) -> Any:
         end_candidates = [i for i in (text.rfind("}"), text.rfind("]")) if i >= 0]
         end = max(end_candidates) if end_candidates else -1
         if end > start:
-            candidates.append(text[start:end + 1])
+            candidates.append(text[start : end + 1])
     for cand in candidates:
         try:
             return json.loads(cand)
@@ -56,8 +57,9 @@ class OpenAICompatLLM:
         self._max_retries = max_retries
         self._backoff = backoff
 
-    def complete(self, *, model: ModelConfig, system: str, user: str,
-                 schema: type[T] | None = None) -> tuple[Any, dict[str, int]]:
+    def complete(
+        self, *, model: ModelConfig, system: str, user: str, schema: type[T] | None = None
+    ) -> tuple[Any, dict[str, int]]:
         api_key = os.environ.get(model.api_key_env, "")
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -80,7 +82,7 @@ class OpenAICompatLLM:
                 with httpx.Client(timeout=model.timeout_seconds) as client:
                     resp = client.post(url, headers=headers, json=payload)
                 if resp.status_code in (429, 500, 502, 503, 504) and attempt < self._max_retries:
-                    time.sleep(self._backoff * (2 ** attempt))
+                    time.sleep(self._backoff * (2**attempt))
                     continue
                 resp.raise_for_status()
                 data = resp.json()
@@ -96,11 +98,10 @@ class OpenAICompatLLM:
                     return extract_json(text), usage
                 except ValueError:
                     return text, usage
-            except (httpx.HTTPError, KeyError, IndexError, ValueError,
-                    ValidationError) as e:
+            except (httpx.HTTPError, KeyError, IndexError, ValueError, ValidationError) as e:
                 last_err = e
                 if attempt < self._max_retries:
-                    time.sleep(self._backoff * (2 ** attempt))
+                    time.sleep(self._backoff * (2**attempt))
                     continue
                 raise LLMError(f"llm call failed after {attempt + 1} attempts: {e}") from e
         raise LLMError(f"llm call failed: {last_err}")
@@ -109,15 +110,14 @@ class OpenAICompatLLM:
 class FakeLLM:
     """결정적 테스트용 fake. script: (system,user)->응답 callable 또는 큐."""
 
-    def __init__(self,
-                 handler: Any = None) -> None:
+    def __init__(self, handler: Any = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self._handler = handler or (lambda **kw: {"result": "ok"})
 
-    def complete(self, *, model: ModelConfig, system: str, user: str,
-                 schema: type[T] | None = None) -> tuple[Any, dict[str, int]]:
-        self.calls.append({"model": model.model, "system": system[:200],
-                           "user": user[:500]})
+    def complete(
+        self, *, model: ModelConfig, system: str, user: str, schema: type[T] | None = None
+    ) -> tuple[Any, dict[str, int]]:
+        self.calls.append({"model": model.model, "system": system[:200], "user": user[:500]})
         out = self._handler(system=system, user=user, model=model, schema=schema)
         result: Any
         if isinstance(out, BaseModel):

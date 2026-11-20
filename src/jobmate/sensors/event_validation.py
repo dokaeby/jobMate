@@ -1,4 +1,5 @@
 """일정 후보 결정적 검증 — timezone/DST/모호/반복."""
+
 from __future__ import annotations
 
 from datetime import datetime

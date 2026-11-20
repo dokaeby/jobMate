@@ -1,0 +1,60 @@
+import httpx
+import pytest
+
+from jobmate.adapters.cronjob import (
+    CronJobOrgClient,
+    CronJobOrgError,
+    daily_at,
+    interval_schedule,
+    weekly_at,
+)
+
+
+def test_interval_schedule():
+    s30 = interval_schedule(30)
+    assert s30["minutes"] == [0, 30]
+    assert s30["hours"] == [-1] and s30["wdays"] == [-1]
+    assert s30["timezone"] == "Asia/Seoul"
+    s60 = interval_schedule(60)
+    assert s60["minutes"] == [0]
+    with pytest.raises(CronJobOrgError):
+        interval_schedule(15)
+
+
+def test_daily_weekly_schedule():
+    d = daily_at(6)
+    assert d["hours"] == [6] and d["minutes"] == [0]
+    w = weekly_at(6, wday=1)
+    assert w["wdays"] == [1]
+
+
+def test_update_schedule_patch():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers.get("authorization")
+        import json
+
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"job": {}})
+
+    client = httpx.Client(
+        base_url="https://api.cron-job.org", transport=httpx.MockTransport(handler)
+    )
+    c = CronJobOrgClient("key123", "999", client=client)
+    sched = interval_schedule(30)
+    c.update_schedule(sched)
+    assert captured["url"].endswith("/jobs/999")
+    assert captured["auth"] == "Bearer key123"
+    assert captured["body"] == {"job": {"schedule": sched}}
+
+
+def test_update_schedule_error():
+    client = httpx.Client(
+        base_url="https://api.cron-job.org",
+        transport=httpx.MockTransport(lambda r: httpx.Response(401, text="bad")),
+    )
+    c = CronJobOrgClient("k", "1", client=client)
+    with pytest.raises(CronJobOrgError):
+        c.update_schedule(interval_schedule(30))

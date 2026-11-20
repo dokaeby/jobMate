@@ -1,4 +1,5 @@
 """function 단계 구현 — 모델 없이 결정적 검사/외부 부수효과."""
+
 from __future__ import annotations
 
 import subprocess
@@ -47,8 +48,9 @@ def auto_checks(ctx: FunctionContext) -> dict[str, Any]:
     else:
         checks.append({"name": "diff_present", "passed": True})
         if not looks_like_diff(diff):
-            checks.append({"name": "diff_format", "passed": False,
-                           "detail": "no 'diff --git' header"})
+            checks.append(
+                {"name": "diff_format", "passed": False, "detail": "no 'diff --git' header"}
+            )
             passed = False
         else:
             checks.append({"name": "diff_format", "passed": True})
@@ -57,14 +59,20 @@ def auto_checks(ctx: FunctionContext) -> dict[str, Any]:
         passed = passed and ok
 
     hits = scan_secrets(diff)
-    checks.append({"name": "secret_scan", "passed": not hits,
-                   "detail": ",".join(hits) if hits else "clean"})
+    checks.append(
+        {"name": "secret_scan", "passed": not hits, "detail": ",".join(hits) if hits else "clean"}
+    )
     passed = passed and not hits
 
     for cmd in ctx.settings.check_commands:
         try:
-            proc = subprocess.run(cmd.split(), capture_output=True, text=True,  # noqa: S603
-                                  timeout=120, cwd=Path.cwd())
+            proc = subprocess.run(
+                cmd.split(),
+                capture_output=True,
+                text=True,  # noqa: S603
+                timeout=120,
+                cwd=Path.cwd(),
+            )
             ok = proc.returncode == 0
         except (OSError, subprocess.TimeoutExpired) as e:
             ok, proc = False, None
@@ -80,8 +88,7 @@ def auto_checks(ctx: FunctionContext) -> dict[str, Any]:
 def _src(ctx: FunctionContext) -> tuple[str, str, str, str, str]:
     """(provider, source_id, connection_id, thread_id, source_url)."""
     provider = ctx.state.get("source_provider") or "gmail"
-    source_id = (ctx.state.get("source_id")
-                 or ctx.state.get("gmail_message_id") or "")
+    source_id = ctx.state.get("source_id") or ctx.state.get("gmail_message_id") or ""
     conn = ctx.state.get("connection_id") or "default"
     thread = ctx.state.get("thread_id") or ""
     url = ctx.state.get("source_url") or ""
@@ -90,8 +97,7 @@ def _src(ctx: FunctionContext) -> tuple[str, str, str, str, str]:
     return provider, source_id, conn, thread, url
 
 
-def _event_key(title: str, start_at: str, end_at: str,
-               timezone: str = "Asia/Seoul") -> str:
+def _event_key(title: str, start_at: str, end_at: str, timezone: str = "Asia/Seoul") -> str:
     """calendar-agent event_key 포팅 — 동일 일정 판별용 정규화 해시."""
     import hashlib
     import json
@@ -120,8 +126,7 @@ def calendar_conflict_check(ctx: FunctionContext) -> dict[str, Any]:
     # 동일 소스가 이미 등록/확인 대기면 중복
     existing = ctx.store.get_scheduled_by_source(provider, source_id)
     if existing and existing.get("status") in ("registered", "needs_confirmation"):
-        return {"status": "duplicate",
-                "calendar_event_id": existing.get("calendar_event_id", "")}
+        return {"status": "duplicate", "calendar_event_id": existing.get("calendar_event_id", "")}
 
     sched_id = f"{provider}:{source_id}"
     start_at, end_at = ev.get("start_at", ""), ev.get("end_at", "")
@@ -132,8 +137,9 @@ def calendar_conflict_check(ctx: FunctionContext) -> dict[str, Any]:
         try:
             matches = cal.search_events(start_at, end_at)
         except Exception as e:
-            ctx.store.audit(ctx.run_id, "tool", "calendar_search_error", "",
-                            {"error": str(e)[:200]})
+            ctx.store.audit(
+                ctx.run_id, "tool", "calendar_search_error", "", {"error": str(e)[:200]}
+            )
             matches = []
 
     key = _event_key(ev.get("title", ""), start_at, end_at, tz)
@@ -143,8 +149,7 @@ def calendar_conflict_check(ctx: FunctionContext) -> dict[str, Any]:
         # 같은 마커(우리 멱등 키)거나 동일 title+시간 → 자기 자신 (복구 경로)
         marker = m.get("marker", "")
         if marker == idempotency_key(f"{provider}:{conn}", source_id):
-            return {"status": "self",
-                    "calendar_event_id": m.get("id", "")}
+            return {"status": "self", "calendar_event_id": m.get("id", "")}
         try:
             ms = m.get("start", {}).get("dateTime", "")
             me = m.get("end", {}).get("dateTime", "")
@@ -155,20 +160,26 @@ def calendar_conflict_check(ctx: FunctionContext) -> dict[str, Any]:
             return {"status": "self", "calendar_event_id": m.get("id", "")}
 
     conflict = any(
-        m.get("status") != "cancelled"
-        and m.get("transparency") != "transparent"
-        for m in matches)
+        m.get("status") != "cancelled" and m.get("transparency") != "transparent" for m in matches
+    )
     status = "conflict" if conflict else "clear"
     # 후보 레지스트리 기록 — 사람 확인 큐의 원천
     ctx.store.save_scheduled_event(
-        event_id=sched_id, source_provider=provider, source_id=source_id,
-        thread_id=thread, title=ev.get("title", ""), start_at=start_at,
-        end_at=end_at, timezone=tz, location=ev.get("location", ""),
+        event_id=sched_id,
+        source_provider=provider,
+        source_id=source_id,
+        thread_id=thread,
+        title=ev.get("title", ""),
+        start_at=start_at,
+        end_at=end_at,
+        timezone=tz,
+        location=ev.get("location", ""),
         summary=ev.get("summary", ""),
         status="needs_confirmation" if conflict else "candidate",
         confidence=float(ev.get("confidence", 0.0)),
         reason="calendar_conflict" if conflict else "",
-        source_refs=source_id)
+        source_refs=source_id,
+    )
     return {"status": status, "match_count": len(matches)}
 
 
@@ -182,8 +193,11 @@ def gmail_validate(ctx: FunctionContext) -> dict[str, Any]:
     except Exception as e:
         return {"status": "invalid", "reason": str(e)[:200]}
     ok, reason = validate_event(ev)
-    return {"status": "validated" if ok else "needs_review",
-            "reason": reason, "event": ev.model_dump()}
+    return {
+        "status": "validated" if ok else "needs_review",
+        "reason": reason,
+        "event": ev.model_dump(),
+    }
 
 
 def gmail_register(ctx: FunctionContext) -> dict[str, Any]:
@@ -205,57 +219,69 @@ def gmail_register(ctx: FunctionContext) -> dict[str, Any]:
         if existing is None:
             return {"status": "duplicate_pending", "idempotency_key": key}
         if existing.calendar_event_id:
-            return {"status": "duplicate",
-                    "calendar_event_id": existing.calendar_event_id,
-                    "idempotency_key": key}
+            return {
+                "status": "duplicate",
+                "calendar_event_id": existing.calendar_event_id,
+                "idempotency_key": key,
+            }
         found = calendar.find_by_marker(key)
         if found:
-            ctx.store.update_link(existing.id, status=LinkStatus.CALENDAR_CREATED,
-                                  calendar_event_id=found)
-            ctx.store.audit(ctx.run_id, "tool", "calendar_recovered", key,
-                            {"event_id": found})
-            return {"status": "recovered", "calendar_event_id": found,
-                    "idempotency_key": key}
+            ctx.store.update_link(
+                existing.id, status=LinkStatus.CALENDAR_CREATED, calendar_event_id=found
+            )
+            ctx.store.audit(ctx.run_id, "tool", "calendar_recovered", key, {"event_id": found})
+            return {"status": "recovered", "calendar_event_id": found, "idempotency_key": key}
         return {"status": "duplicate_pending", "idempotency_key": key}
 
     # pending 링크 확보 후 외부 호출 — 타임아웃 시 marker 조회로 복구
     try:
         existing = calendar.find_by_marker(key)
         if existing:
-            ctx.store.update_link(link.id, status=LinkStatus.CALENDAR_CREATED,
-                                  calendar_event_id=existing)
-            return {"status": "recovered", "calendar_event_id": existing,
-                    "idempotency_key": key}
-        event_id = calendar.create_event(title=ev.get("title", ""),
-                                       start_at=ev.get("start_at", ""),
-                                       end_at=ev.get("end_at", ""),
-                                       timezone=ev.get("timezone", "Asia/Seoul"),
-                                       location=ev.get("location", ""),
-                                       marker=key)
+            ctx.store.update_link(
+                link.id, status=LinkStatus.CALENDAR_CREATED, calendar_event_id=existing
+            )
+            return {"status": "recovered", "calendar_event_id": existing, "idempotency_key": key}
+        event_id = calendar.create_event(
+            title=ev.get("title", ""),
+            start_at=ev.get("start_at", ""),
+            end_at=ev.get("end_at", ""),
+            timezone=ev.get("timezone", "Asia/Seoul"),
+            location=ev.get("location", ""),
+            marker=key,
+        )
     except Exception as e:
-        ctx.store.update_link(link.id, status=LinkStatus.RETRY_WAIT,
-                              last_error=str(e)[:300], attempts_inc=True)
-        ctx.store.audit(ctx.run_id, "tool", "calendar_error", key,
-                        {"error": str(e)[:200]})
+        ctx.store.update_link(
+            link.id, status=LinkStatus.RETRY_WAIT, last_error=str(e)[:300], attempts_inc=True
+        )
+        ctx.store.audit(ctx.run_id, "tool", "calendar_error", key, {"error": str(e)[:200]})
         return {"status": "retry_wait", "error": str(e)[:300]}
 
-    ctx.store.update_link(link.id, status=LinkStatus.CALENDAR_CREATED,
-                          calendar_event_id=event_id)
-    ctx.store.audit(ctx.run_id, "tool", "calendar_created", key,
-                    {"event_id": event_id})
+    ctx.store.update_link(link.id, status=LinkStatus.CALENDAR_CREATED, calendar_event_id=event_id)
+    ctx.store.audit(ctx.run_id, "tool", "calendar_created", key, {"event_id": event_id})
     # scheduled_events 레지스트리 갱신 (candidate → registered)
     provider, source_id, _, thread, _ = _src(ctx)
     ctx.store.save_scheduled_event(
-        event_id=f"{provider}:{source_id}", source_provider=provider,
-        source_id=source_id, thread_id=thread, calendar_event_id=event_id,
-        title=ev.get("title", ""), start_at=ev.get("start_at", ""),
-        end_at=ev.get("end_at", ""), timezone=ev.get("timezone", "Asia/Seoul"),
-        location=ev.get("location", ""), summary=ev.get("summary", ""),
-        status="registered", confidence=float(ev.get("confidence", 0.0)),
-        source_refs=source_id)
-    return {"status": "created", "calendar_event_id": event_id,
-            "idempotency_key": key, "scheduled_event_id":
-            f"{provider}:{source_id}"}
+        event_id=f"{provider}:{source_id}",
+        source_provider=provider,
+        source_id=source_id,
+        thread_id=thread,
+        calendar_event_id=event_id,
+        title=ev.get("title", ""),
+        start_at=ev.get("start_at", ""),
+        end_at=ev.get("end_at", ""),
+        timezone=ev.get("timezone", "Asia/Seoul"),
+        location=ev.get("location", ""),
+        summary=ev.get("summary", ""),
+        status="registered",
+        confidence=float(ev.get("confidence", 0.0)),
+        source_refs=source_id,
+    )
+    return {
+        "status": "created",
+        "calendar_event_id": event_id,
+        "idempotency_key": key,
+        "scheduled_event_id": f"{provider}:{source_id}",
+    }
 
 
 def gmail_notify(ctx: FunctionContext) -> dict[str, Any]:
@@ -277,25 +303,28 @@ def gmail_notify(ctx: FunctionContext) -> dict[str, Any]:
         return {"status": "no_adapter"}
     n = ctx.store.add_notification(
         title=f"일정 등록: {ev.get('title', '')}",
-        body=ev.get("start_at", ""), source_url=source_url,
-        run_id=ctx.run_id, link_id=link.id)
+        body=ev.get("start_at", ""),
+        source_url=source_url,
+        run_id=ctx.run_id,
+        link_id=link.id,
+    )
     try:
         notifier.send(title=n.title, body=n.body, source_url=n.source_url)
         ctx.store.set_notification_status(n.id, NotificationStatus.SENT)
-        ctx.store.update_link(link.id, status=LinkStatus.NOTIFIED,
-                              notification_id=n.id)
+        ctx.store.update_link(link.id, status=LinkStatus.NOTIFIED, notification_id=n.id)
         jobs = _schedule_event_notifications(ctx, ev, reg)
         _send_web_push(ctx, n)
-        return {"status": "notified", "notification_id": n.id,
-                "notification_jobs": jobs}
+        return {"status": "notified", "notification_id": n.id, "notification_jobs": jobs}
     except Exception as e:
         ctx.store.set_notification_status(n.id, NotificationStatus.FAILED)
-        ctx.store.update_link(link.id, status=LinkStatus.NOTIFICATION_QUEUED,
-                              notification_id=n.id, last_error=str(e)[:300])
-        ctx.store.audit(ctx.run_id, "tool", "notify_failed", link.id,
-                        {"error": str(e)[:200]})
-        return {"status": "notify_failed", "notification_id": n.id,
-                "error": str(e)[:300]}
+        ctx.store.update_link(
+            link.id,
+            status=LinkStatus.NOTIFICATION_QUEUED,
+            notification_id=n.id,
+            last_error=str(e)[:300],
+        )
+        ctx.store.audit(ctx.run_id, "tool", "notify_failed", link.id, {"error": str(e)[:200]})
+        return {"status": "notify_failed", "notification_id": n.id, "error": str(e)[:300]}
 
 
 def _send_web_push(ctx: FunctionContext, n: Any) -> None:
@@ -306,13 +335,12 @@ def _send_web_push(ctx: FunctionContext, n: Any) -> None:
     try:
         push.send(title=n.title, body=n.body, source_url=n.source_url)
     except Exception as e:
-        ctx.store.audit(ctx.run_id, "tool", "webpush_failed", str(n.id),
-                        {"error": str(e)[:200]})
+        ctx.store.audit(ctx.run_id, "tool", "webpush_failed", str(n.id), {"error": str(e)[:200]})
 
 
-def _schedule_event_notifications(ctx: FunctionContext,
-                                  ev: dict[str, Any],
-                                  reg: dict[str, Any]) -> list[str]:
+def _schedule_event_notifications(
+    ctx: FunctionContext, ev: dict[str, Any], reg: dict[str, Any]
+) -> list[str]:
     """calendar-agent NotificationScheduler 포팅 — 시작 2h/1h 전 예약."""
     sched_id = reg.get("scheduled_event_id") or ""
     if not sched_id:
@@ -328,15 +356,22 @@ def _schedule_event_notifications(ctx: FunctionContext,
     jobs: list[str] = []
     # 90분 이내 등록이면 2h 알림 생략, 30분 이내면 1h 알림 생략 (원본 규칙)
     if (start - now).total_seconds() > 90 * 60:
-        jobs.append(ctx.store.save_notification_job(
-            sched_id, "push", (start - timedelta(hours=2)).isoformat()))
+        jobs.append(
+            ctx.store.save_notification_job(
+                sched_id, "push", (start - timedelta(hours=2)).isoformat()
+            )
+        )
     if (start - now).total_seconds() > 30 * 60:
-        jobs.append(ctx.store.save_notification_job(
-            sched_id, "email", (start - timedelta(hours=1)).isoformat()))
+        jobs.append(
+            ctx.store.save_notification_job(
+                sched_id, "email", (start - timedelta(hours=1)).isoformat()
+            )
+        )
     return jobs
 
 
 # ---------- skillRadar (radar_*) ----------
+
 
 def _radar_platforms(ctx: FunctionContext) -> list[str]:
     p = ctx.state.get("platform") or "all"
@@ -409,9 +444,19 @@ def radar_summarize(ctx: FunctionContext) -> dict[str, Any]:
         item["content_hash"] = chash
         cached = ctx.store.radar_cached_repo(r.get("full_name", ""), chash)
         if cached:
-            item.update({k: cached[k] for k in
-                         ("summary_en", "summary_zh", "summary_ko", "taxonomy",
-                          "taxonomy_confidence", "summary_status")})
+            item.update(
+                {
+                    k: cached[k]
+                    for k in (
+                        "summary_en",
+                        "summary_zh",
+                        "summary_ko",
+                        "taxonomy",
+                        "taxonomy_confidence",
+                        "summary_status",
+                    )
+                }
+            )
             item["summary_source"] = "cache"
             out_repos.append(item)
             continue
@@ -423,25 +468,36 @@ def radar_summarize(ctx: FunctionContext) -> dict[str, Any]:
             f"topics: {', '.join(r.get('topics') or [])}\n"
             f"license: {r.get('license') or ''}\n"
             f"stars: {r.get('stars', 0)}\n\n"
-            f"README:\n{(r.get('readme') or '')[:3000]}")
+            f"README:\n{(r.get('readme') or '')[:3000]}"
+        )
         try:
             parsed, usage = ctx.llm.complete(
-                model=model, system=system, user=user, schema=RepoSummary)
-            summ = parsed if isinstance(parsed, RepoSummary) else \
-                RepoSummary.model_validate(parsed)
+                model=model, system=system, user=user, schema=RepoSummary
+            )
+            summ = parsed if isinstance(parsed, RepoSummary) else RepoSummary.model_validate(parsed)
             item.update(summ.model_dump())
             item["summary_source"] = "llm"
             tokens["tokens_in"] += usage.get("tokens_in", 0)
             tokens["tokens_out"] += usage.get("tokens_out", 0)
         except Exception as e:
-            item.update({
-                "summary_en": r.get("description") or "",
-                "summary_zh": "", "summary_ko": r.get("description") or "",
-                "taxonomy": "other", "taxonomy_confidence": 0.0,
-                "summary_status": "fallback"})
+            item.update(
+                {
+                    "summary_en": r.get("description") or "",
+                    "summary_zh": "",
+                    "summary_ko": r.get("description") or "",
+                    "taxonomy": "other",
+                    "taxonomy_confidence": 0.0,
+                    "summary_status": "fallback",
+                }
+            )
             item["summary_source"] = "fallback"
-            ctx.store.audit(ctx.run_id, "tool", "radar_summarize_error",
-                            r.get("full_name", ""), {"error": str(e)[:200]})
+            ctx.store.audit(
+                ctx.run_id,
+                "tool",
+                "radar_summarize_error",
+                r.get("full_name", ""),
+                {"error": str(e)[:200]},
+            )
         item["readme_excerpt"] = (r.get("readme") or "")[:3000]
         out_repos.append(item)
     return {"status": "ok", "repos": out_repos, **tokens}
@@ -464,17 +520,18 @@ def radar_rank(ctx: FunctionContext) -> dict[str, Any]:
             prev_cache[p] = ctx.store.radar_prev_stars(p, today)
         prev = prev_cache[p].get(r.get("full_name", ""))
         r["stars_today"] = stars_delta(int(r.get("stars", 0)), prev)
-        score = (int(r.get("stars", 0))
-                 + (r["stars_today"] or 0) * 2
-                 + (50 if r.get("license") else 0)
-                 + float(r.get("taxonomy_confidence", 0.0)) * 10)
+        score = (
+            int(r.get("stars", 0))
+            + (r["stars_today"] or 0) * 2
+            + (50 if r.get("license") else 0)
+            + float(r.get("taxonomy_confidence", 0.0)) * 10
+        )
         r["rank_score"] = score
     repos.sort(key=lambda x: x["rank_score"], reverse=True)
     for i, r in enumerate(repos, 1):
         r["rank"] = i
     platforms = sorted({r.get("platform", "") for r in repos})
-    return {"status": "ok", "repos": repos,
-            "date": today, "platforms": platforms}
+    return {"status": "ok", "repos": repos, "date": today, "platforms": platforms}
 
 
 def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
@@ -501,28 +558,32 @@ def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
             if snap:
                 ctx.store.delete_radar_snapshot(int(snap["id"]))
         snap_id = ctx.store.save_radar_snapshot(
-            platform, date_str, {"count": len(items), "run_id": ctx.run_id})
+            platform, date_str, {"count": len(items), "run_id": ctx.run_id}
+        )
         for it in items:
-            ctx.store.add_radar_item(snap_id, {
-                "rank": it.get("rank", 0),
-                "repo_full_name": it.get("full_name", ""),
-                "repo_url": it.get("html_url", ""),
-                "description": it.get("description") or "",
-                "stars": it.get("stars", 0),
-                "language": it.get("language") or "",
-                "topics": it.get("topics") or [],
-                "readme_excerpt": it.get("readme_excerpt", ""),
-                "summary_en": it.get("summary_en", ""),
-                "summary_zh": it.get("summary_zh", ""),
-                "summary_ko": it.get("summary_ko", ""),
-                "content_hash": it.get("content_hash", ""),
-                "stars_today": it.get("stars_today"),
-                "license": it.get("license") or "",
-                "taxonomy": it.get("taxonomy", ""),
-                "taxonomy_confidence": it.get("taxonomy_confidence", 0.0),
-                "rank_score": it.get("rank_score", 0.0),
-                "summary_status": it.get("summary_status", ""),
-            })
+            ctx.store.add_radar_item(
+                snap_id,
+                {
+                    "rank": it.get("rank", 0),
+                    "repo_full_name": it.get("full_name", ""),
+                    "repo_url": it.get("html_url", ""),
+                    "description": it.get("description") or "",
+                    "stars": it.get("stars", 0),
+                    "language": it.get("language") or "",
+                    "topics": it.get("topics") or [],
+                    "readme_excerpt": it.get("readme_excerpt", ""),
+                    "summary_en": it.get("summary_en", ""),
+                    "summary_zh": it.get("summary_zh", ""),
+                    "summary_ko": it.get("summary_ko", ""),
+                    "content_hash": it.get("content_hash", ""),
+                    "stars_today": it.get("stars_today"),
+                    "license": it.get("license") or "",
+                    "taxonomy": it.get("taxonomy", ""),
+                    "taxonomy_confidence": it.get("taxonomy_confidence", 0.0),
+                    "rank_score": it.get("rank_score", 0.0),
+                    "summary_status": it.get("summary_status", ""),
+                },
+            )
         written[platform] = len(items)
 
     if notifier is not None and written:
@@ -531,11 +592,11 @@ def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
             notifier.send(
                 title=f"skillRadar 수집 완료 ({date_str})",
                 body=f"{total}개 저장소 스냅샷 저장: "
-                     + ", ".join(f"{k} {v}" for k, v in written.items()),
-                source_url="")
+                + ", ".join(f"{k} {v}" for k, v in written.items()),
+                source_url="",
+            )
         except Exception as e:
-            ctx.store.audit(ctx.run_id, "tool", "radar_notify_error", "",
-                            {"error": str(e)[:200]})
+            ctx.store.audit(ctx.run_id, "tool", "radar_notify_error", "", {"error": str(e)[:200]})
     return {"status": "published", "written": written, "date": date_str}
 
 

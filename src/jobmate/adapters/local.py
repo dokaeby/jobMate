@@ -1,4 +1,5 @@
 """로컬 실행용 실용 어댑터 — 로그 기록 notifier 등."""
+
 from __future__ import annotations
 
 import logging

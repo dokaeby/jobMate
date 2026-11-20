@@ -1,4 +1,5 @@
 """Slack/Telegram 웹훅 서명 검증 — calendar-agent message_listeners 포팅."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,8 +7,7 @@ import hmac
 import time
 
 
-def verify_slack_signature(body: bytes, timestamp: str, signature: str,
-                           secret: str) -> bool:
+def verify_slack_signature(body: bytes, timestamp: str, signature: str, secret: str) -> bool:
     """Slack 서명 + 5분 유효시간 검사. 원본 바이트 기준 HMAC."""
     if not secret:
         return False
@@ -18,9 +18,12 @@ def verify_slack_signature(body: bytes, timestamp: str, signature: str,
             return False
     except ValueError:
         return False
-    expected = "v0=" + hmac.new(
-        secret.encode(), b"v0:" + timestamp.encode() + b":" + body,
-        hashlib.sha256).hexdigest()
+    expected = (
+        "v0="
+        + hmac.new(
+            secret.encode(), b"v0:" + timestamp.encode() + b":" + body, hashlib.sha256
+        ).hexdigest()
+    )
     return hmac.compare_digest(expected.encode(), signature.encode())
 
 

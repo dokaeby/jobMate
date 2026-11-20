@@ -1,4 +1,5 @@
 """calendar-agent 포팅 기능 테스트 — 웹훅 인증, 충돌 검사, 알림 예약."""
+
 import hashlib
 import hmac
 import time
@@ -11,9 +12,12 @@ from jobmate.sensors import (
 
 
 def _slack_sig(body: bytes, ts: str, signing_key: str) -> str:
-    return "v0=" + hmac.new(
-        signing_key.encode(), b"v0:" + ts.encode() + b":" + body,
-        hashlib.sha256).hexdigest()
+    return (
+        "v0="
+        + hmac.new(
+            signing_key.encode(), b"v0:" + ts.encode() + b":" + body, hashlib.sha256
+        ).hexdigest()
+    )
 
 
 def test_slack_signature_valid():

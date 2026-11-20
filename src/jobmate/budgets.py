@@ -1,4 +1,5 @@
 """예산/루프 상한 트래커 — 소진 시 안전 정지."""
+
 from __future__ import annotations
 
 import time

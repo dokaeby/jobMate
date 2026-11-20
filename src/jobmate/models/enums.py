@@ -1,4 +1,5 @@
 """공통 열거형."""
+
 from enum import StrEnum
 
 
@@ -59,9 +60,9 @@ class Severity(StrEnum):
 
 
 class Confidence(StrEnum):
-    HIGH = "high"        # 7+
-    MEDIUM = "medium"    # 5-6
-    LOW = "low"          # 3-4
+    HIGH = "high"  # 7+
+    MEDIUM = "medium"  # 5-6
+    LOW = "low"  # 3-4
     VERY_LOW = "very_low"  # 1-2
 
 

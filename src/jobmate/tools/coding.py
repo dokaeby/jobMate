@@ -4,6 +4,7 @@
 각 어댑터는 헤드리스 모드로 프롬프트를 실행하고, 작업 디렉터리가 git
 레포이면 변경분을 unified diff로 수집해 ChangeProposal.diff로 반환한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -20,8 +21,8 @@ MAX_DIFF_CHARS = 200_000
 @dataclass
 class CodingToolResult:
     ok: bool
-    text: str            # 도구의 최종 텍스트 출력
-    diff: str            # 작업 디렉터리의 git 변경분 (unified diff)
+    text: str  # 도구의 최종 텍스트 출력
+    diff: str  # 작업 디렉터리의 git 변경분 (unified diff)
     exit_code: int
     tool: str
 
@@ -33,8 +34,7 @@ class CodingTool(Protocol):
         """CLI 바이너리가 PATH에 있는지."""
         ...
 
-    def run(self, *, prompt: str, cwd: str, timeout: float) -> CodingToolResult:
-        ...
+    def run(self, *, prompt: str, cwd: str, timeout: float) -> CodingToolResult: ...
 
 
 class CodingToolError(Exception):
@@ -48,13 +48,12 @@ def _run_cmd(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]:
         # 막기 위해 명시적으로 설정한다.
         env = {**os.environ, "PWD": os.path.abspath(cwd)}
         proc = subprocess.run(  # noqa: S603
-            argv, cwd=cwd, env=env, capture_output=True, text=True,
-            timeout=timeout)
+            argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout
+        )
     except FileNotFoundError as e:
         raise CodingToolError(f"{argv[0]} not found") from e
     except subprocess.TimeoutExpired as e:
-        raise CodingToolError(
-            f"{argv[0]} timed out after {timeout}s") from e
+        raise CodingToolError(f"{argv[0]} timed out after {timeout}s") from e
     out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
     return proc.returncode, out[:MAX_OUTPUT_CHARS]
 
@@ -79,8 +78,7 @@ def workspace_diff(cwd: str) -> str:
         fp = root / f
         if not fp.is_file():
             continue
-        code, d = _run_cmd(
-            ["git", "diff", "--no-index", "--", "/dev/null", f], cwd, 30)
+        code, d = _run_cmd(["git", "diff", "--no-index", "--", "/dev/null", f], cwd, 30)
         # git diff --no-index는 차이 있을 때 exit 1 — 정상
         if d.strip():
             parts.append(d[:MAX_DIFF_CHARS])
@@ -111,8 +109,8 @@ class _CliCodingTool:
             raise CodingToolError(f"{self.name}: {self.binary} not on PATH")
         code, out = _run_cmd(self.argv(prompt), cwd, timeout)
         return CodingToolResult(
-            ok=code == 0, text=out, diff=workspace_diff(cwd),
-            exit_code=code, tool=self.name)
+            ok=code == 0, text=out, diff=workspace_diff(cwd), exit_code=code, tool=self.name
+        )
 
 
 class ClaudeCodingTool(_CliCodingTool):
@@ -126,8 +124,16 @@ class ClaudeCodingTool(_CliCodingTool):
     name = "claude"
 
     def argv(self, prompt: str) -> list[str]:
-        return ["claude", "-p", prompt, "--output-format", "text",
-                "--permission-mode", "bypassPermissions", *self._model_args()]
+        return [
+            "claude",
+            "-p",
+            prompt,
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "bypassPermissions",
+            *self._model_args(),
+        ]
 
 
 class CodexCodingTool(_CliCodingTool):
@@ -137,8 +143,7 @@ class CodexCodingTool(_CliCodingTool):
     name = "codex"
 
     def argv(self, prompt: str) -> list[str]:
-        return ["codex", "exec", "--sandbox", "workspace-write",
-                *self._model_args(), prompt]
+        return ["codex", "exec", "--sandbox", "workspace-write", *self._model_args(), prompt]
 
 
 class AntigravityCodingTool(_CliCodingTool):
@@ -153,8 +158,13 @@ class AntigravityCodingTool(_CliCodingTool):
     name = "antigravity"
 
     def argv(self, prompt: str) -> list[str]:
-        return ["agy", f"--print={prompt}", "--dangerously-skip-permissions",
-                "--sandbox", *self._model_args()]
+        return [
+            "agy",
+            f"--print={prompt}",
+            "--dangerously-skip-permissions",
+            "--sandbox",
+            *self._model_args(),
+        ]
 
 
 class OpenCodeCodingTool(_CliCodingTool):
@@ -175,7 +185,6 @@ CODING_TOOLS: dict[str, type[_CliCodingTool]] = {
 }
 
 
-def build_coding_tool(name: str,
-                      model: str | None = None) -> CodingTool | None:
+def build_coding_tool(name: str, model: str | None = None) -> CodingTool | None:
     cls = CODING_TOOLS.get(name)
     return cls(model=model) if cls else None

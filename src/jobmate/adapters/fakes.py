@@ -1,4 +1,5 @@
 """테스트/로컬용 fake 어댑터 — 결정적."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -18,8 +19,13 @@ class FakeGmail:
         for m in self._messages:
             if m.get("id") == message_id:
                 return m
-        return {"id": message_id, "subject": "", "body_text": "",
-                "from_addr": "", "internal_date": ""}
+        return {
+            "id": message_id,
+            "subject": "",
+            "body_text": "",
+            "from_addr": "",
+            "internal_date": "",
+        }
 
 
 class FakeCalendar:
@@ -31,23 +37,35 @@ class FakeCalendar:
         self.timeout_next: Exception | None = None
         self.search_calls = 0
 
-    def create_event(self, *, title: str, start_at: str, end_at: str,
-                     timezone: str, location: str, marker: str,
-                     event_id: str | None = None) -> str:
+    def create_event(
+        self,
+        *,
+        title: str,
+        start_at: str,
+        end_at: str,
+        timezone: str,
+        location: str,
+        marker: str,
+        event_id: str | None = None,
+    ) -> str:
         self.create_calls += 1
         if self.timeout_next is not None:
             # 결과 불명 타임아웃 — 이벤트는 생성됐을 수 있음
             eid = event_id or f"evt_{self.create_calls}"
-            self.events[eid] = {"title": title, "marker": marker,
-                                "start": start_at, "end": end_at}
+            self.events[eid] = {"title": title, "marker": marker, "start": start_at, "end": end_at}
             self._by_marker[marker] = eid
             raise self.timeout_next
         if self.fail_next is not None:
             raise self.fail_next
         eid = event_id or f"evt_{self.create_calls}"
-        self.events[eid] = {"title": title, "marker": marker,
-                            "start": start_at, "end": end_at,
-                            "timezone": timezone, "location": location}
+        self.events[eid] = {
+            "title": title,
+            "marker": marker,
+            "start": start_at,
+            "end": end_at,
+            "timezone": timezone,
+            "location": location,
+        }
         self._by_marker[marker] = eid
         return eid
 
@@ -72,22 +90,30 @@ class FakeCalendar:
             except (KeyError, ValueError):
                 continue
             if es < e and ee > s:
-                out.append({"id": eid, "summary": ev.get("title", ""),
-                            "status": "confirmed",
-                            "transparency": "opaque",
-                            "start": {"dateTime": str(ev["start"])},
-                            "end": {"dateTime": str(ev["end"])},
-                            "marker": ev.get("marker", "")})
+                out.append(
+                    {
+                        "id": eid,
+                        "summary": ev.get("title", ""),
+                        "status": "confirmed",
+                        "transparency": "opaque",
+                        "start": {"dateTime": str(ev["start"])},
+                        "end": {"dateTime": str(ev["end"])},
+                        "marker": ev.get("marker", ""),
+                    }
+                )
         return out
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
         ev = self.events.get(event_id)
         if ev is None:
             return None
-        return {"id": event_id, "summary": ev.get("title", ""),
-                "status": ev.get("status", "confirmed"),
-                "start": {"dateTime": str(ev.get("start", ""))},
-                "end": {"dateTime": str(ev.get("end", ""))}}
+        return {
+            "id": event_id,
+            "summary": ev.get("title", ""),
+            "status": ev.get("status", "confirmed"),
+            "start": {"dateTime": str(ev.get("start", ""))},
+            "end": {"dateTime": str(ev.get("end", ""))},
+        }
 
 
 class FakeNotifier:
@@ -104,14 +130,16 @@ class FakeNotifier:
 class FakeGitHub:
     """결정적 GitHub fake — search_repositories/fetch_readme."""
 
-    def __init__(self, repos: dict[str, list[dict[str, Any]]] | None = None,
-                 readmes: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        repos: dict[str, list[dict[str, Any]]] | None = None,
+        readmes: dict[str, str] | None = None,
+    ) -> None:
         self._repos = repos or {}
         self._readmes = readmes or {}
         self.queries: list[str] = []
 
-    def search_repositories(self, query: str,
-                            per_page: int = 30) -> list[dict[str, Any]]:
+    def search_repositories(self, query: str, per_page: int = 30) -> list[dict[str, Any]]:
         self.queries.append(query)
         return list(self._repos.get(query) or self._repos.get("*", []))[:per_page]
 

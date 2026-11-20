@@ -1,4 +1,5 @@
 """LangGraph 기반 워크플로 실행기 — spec 해석, 분기, interrupt 승인, 예산."""
+
 from __future__ import annotations
 
 import time
@@ -36,11 +37,19 @@ REVIEW_DECISION_STAGES = {"security", "code_review", "qa"}
 class WorkflowRunner:
     """WorkflowSpec 하나를 LangGraph로 컴파일해 실행한다."""
 
-    def __init__(self, *, spec: WorkflowSpec, registry: Any, store: Store,
-                 llm: LLMClient, tools: Any, settings: Any,
-                 checkpointer: SqliteSaver | None = None,
-                 adapters: dict[str, Any] | None = None,
-                 coding: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        spec: WorkflowSpec,
+        registry: Any,
+        store: Store,
+        llm: LLMClient,
+        tools: Any,
+        settings: Any,
+        checkpointer: SqliteSaver | None = None,
+        adapters: dict[str, Any] | None = None,
+        coding: Any | None = None,
+    ) -> None:
         self.spec = spec
         self.registry = registry
         self.store = store
@@ -99,13 +108,14 @@ class WorkflowRunner:
 
     # ---------- budget ----------
     def _budget_exceeded(self, state: HarnessState) -> str | None:
-        if state.get("tokens_in", 0) + state.get("tokens_out", 0) >= \
-                self.settings.budget_max_tokens:
+        if (
+            state.get("tokens_in", 0) + state.get("tokens_out", 0)
+            >= self.settings.budget_max_tokens
+        ):
             return "token_budget"
         if state.get("tool_calls", 0) >= self.settings.budget_max_tool_calls:
             return "tool_call_budget"
-        if time.time() - state.get("started_at", time.time()) >= \
-                self.settings.budget_max_seconds:
+        if time.time() - state.get("started_at", time.time()) >= self.settings.budget_max_seconds:
             return "time_budget"
         if state.get("cost_usd", 0.0) >= self.settings.budget_max_cost_usd:
             return "cost_budget"
@@ -142,42 +152,53 @@ class WorkflowRunner:
         cap = self._loop_cap_check(state, stage)
         if cap:
             state["escalate"] = ESCALATE_NEEDS_HUMAN
-            self.store.audit(run_id, "system", "loop_cap", stage.key,
-                             {"reason": cap})
+            self.store.audit(run_id, "system", "loop_cap", stage.key, {"reason": cap})
             return {"escalate": ESCALATE_NEEDS_HUMAN}
         reason = self._budget_exceeded(state)
         if reason:
             state["escalate"] = ESCALATE_BUDGET
-            self.store.audit(run_id, "system", "budget_exhausted", stage.key,
-                             {"reason": reason})
+            self.store.audit(run_id, "system", "budget_exhausted", stage.key, {"reason": reason})
             return {"escalate": ESCALATE_BUDGET}
 
         attempt = self._attempt(state, stage.key)
         prompt_text, prompt_version = load_prompt(agent.prompt)
         stage_run = self.store.start_stage(
-            run_id, stage.key, attempt,
+            run_id,
+            stage.key,
+            attempt,
             {"agent": agent.key, "role": agent.role},
-            model=agent.model.model, prompt_version=prompt_version)
+            model=agent.model.model,
+            prompt_version=prompt_version,
+        )
         try:
             schema = SCHEMAS.get(agent.output_schema)
             user = self._build_user_prompt(state, stage, agent)
             if agent.coding_tool and self.coding is not None:
-                parsed, usage = self._coding_complete(
-                    agent, prompt_text, user, state, schema)
+                parsed, usage = self._coding_complete(agent, prompt_text, user, state, schema)
             else:
                 out, usage = self.llm.complete(
-                    model=agent.model, system=prompt_text, user=user,
-                    schema=schema)
-                parsed = out if isinstance(out, dict) else (
-                    out.model_dump() if hasattr(out, "model_dump")
-                    else {"result": str(out)})
+                    model=agent.model, system=prompt_text, user=user, schema=schema
+                )
+                parsed = (
+                    out
+                    if isinstance(out, dict)
+                    else (out.model_dump() if hasattr(out, "model_dump") else {"result": str(out)})
+                )
             parsed = self._apply_sensors(agent.role, parsed)
             self.store.finish_stage(
-                stage_run.id, status=StageStatus.SUCCEEDED, output=parsed,
+                stage_run.id,
+                status=StageStatus.SUCCEEDED,
+                output=parsed,
                 tokens_in=usage.get("tokens_in", 0),
-                tokens_out=usage.get("tokens_out", 0))
-            self.store.audit(run_id, f"agent:{agent.role}", "verdict",
-                             stage.key, self._audit_detail(agent.role, parsed))
+                tokens_out=usage.get("tokens_out", 0),
+            )
+            self.store.audit(
+                run_id,
+                f"agent:{agent.role}",
+                "verdict",
+                stage.key,
+                self._audit_detail(agent.role, parsed),
+            )
 
             update: dict[str, Any] = {
                 "stage_outputs": {stage.key: parsed},
@@ -186,43 +207,43 @@ class WorkflowRunner:
             }
             if stage.key == "implement":
                 update["implement_rounds"] = state.get("implement_rounds", 0) + 1
-            if stage.key in REVIEW_DECISION_STAGES and \
-                    parsed.get("decision") == "request_changes":
+            if stage.key in REVIEW_DECISION_STAGES and parsed.get("decision") == "request_changes":
                 update["review_rounds"] = state.get("review_rounds", 0) + 1
-            if parsed.get("done_state") in (DoneState.BLOCKED.value,
-                                            DoneState.NEEDS_CONTEXT.value):
+            if parsed.get("done_state") in (DoneState.BLOCKED.value, DoneState.NEEDS_CONTEXT.value):
                 update["escalate"] = ESCALATE_NEEDS_HUMAN
             return update
         except Exception as e:
-            self.store.finish_stage(stage_run.id, status=StageStatus.FAILED,
-                                    error=str(e)[:500])
-            self.store.audit(run_id, f"agent:{agent.role}", "stage_error",
-                             stage.key, {"error": str(e)[:200]})
+            self.store.finish_stage(stage_run.id, status=StageStatus.FAILED, error=str(e)[:500])
+            self.store.audit(
+                run_id, f"agent:{agent.role}", "stage_error", stage.key, {"error": str(e)[:200]}
+            )
             if attempt >= agent.max_attempts:
                 return {"escalate": ESCALATE_FAILED}
             # 스키마/파싱 실패 — 재시도는 다음 attempt로 진행하기 위해
             # 에러 출력을 남기고 route가 재진입하도록 한다.
-            return {"stage_outputs": {stage.key: {"__retry__": True,
-                                                  "error": str(e)[:300]}}}
+            return {"stage_outputs": {stage.key: {"__retry__": True, "error": str(e)[:300]}}}
 
-    def _run_function_stage(self, state: HarnessState,
-                            stage: StageSpec) -> dict[str, Any]:
+    def _run_function_stage(self, state: HarnessState, stage: StageSpec) -> dict[str, Any]:
         run_id = state["run_id"]
         attempt = self._attempt(state, stage.key)
-        stage_run = self.store.start_stage(
-            run_id, stage.key, attempt, {"function": stage.function})
+        stage_run = self.store.start_stage(run_id, stage.key, attempt, {"function": stage.function})
         fn = FUNCTIONS.get(stage.function or "")
         if fn is None:
-            self.store.finish_stage(stage_run.id, status=StageStatus.FAILED,
-                                    error=f"unknown function {stage.function}")
+            self.store.finish_stage(
+                stage_run.id, status=StageStatus.FAILED, error=f"unknown function {stage.function}"
+            )
             return {"escalate": ESCALATE_FAILED}
         try:
-            ctx = FunctionContext(state=state, store=self.store,
-                                  settings=self.settings, adapters=self.adapters,
-                                  run_id=run_id, llm=self.llm)
+            ctx = FunctionContext(
+                state=state,
+                store=self.store,
+                settings=self.settings,
+                adapters=self.adapters,
+                run_id=run_id,
+                llm=self.llm,
+            )
             out = fn(ctx)
-            self.store.finish_stage(stage_run.id, status=StageStatus.SUCCEEDED,
-                                    output=out)
+            self.store.finish_stage(stage_run.id, status=StageStatus.SUCCEEDED, output=out)
             update: dict[str, Any] = {"stage_outputs": {stage.key: out}}
             # 자동 검사 FAIL → fix 회귀 카운터
             if stage.key == "auto_checks" and out.get("passed") is False:
@@ -231,19 +252,17 @@ class WorkflowRunner:
                     update["escalate"] = ESCALATE_NEEDS_HUMAN
             return update
         except Exception as e:
-            self.store.finish_stage(stage_run.id, status=StageStatus.FAILED,
-                                    error=str(e)[:500])
-            self.store.audit(run_id, "tool", "function_error", stage.key,
-                             {"error": str(e)[:200]})
+            self.store.finish_stage(stage_run.id, status=StageStatus.FAILED, error=str(e)[:500])
+            self.store.audit(run_id, "tool", "function_error", stage.key, {"error": str(e)[:200]})
             return {"escalate": ESCALATE_FAILED}
 
-    def _run_human_stage(self, state: HarnessState,
-                         stage: StageSpec) -> dict[str, Any]:
+    def _run_human_stage(self, state: HarnessState, stage: StageSpec) -> dict[str, Any]:
         run_id = state["run_id"]
         summary = self._approval_summary(state)
         self.store.update_run(run_id, status=RunStatus.WAITING_APPROVAL)
-        self.store.audit(run_id, "system", "waiting_approval", stage.key,
-                         {"summary": summary[:500]})
+        self.store.audit(
+            run_id, "system", "waiting_approval", stage.key, {"summary": summary[:500]}
+        )
         # resume 시 interrupt 이전 코드가 재실행되므로, 이미 RUNNING인
         # stage_run이 있으면 재사용해 고아 레코드를 만들지 않는다.
         prior = self.store.latest_stage(run_id, stage.key)
@@ -252,49 +271,47 @@ class WorkflowRunner:
         else:
             attempt = self._attempt(state, stage.key)
             stage_run_id = self.store.start_stage(
-                run_id, stage.key, attempt, {"summary": summary[:500]}).id
-        decision = interrupt({"run_id": run_id, "stage": stage.key,
-                              "summary": summary})
+                run_id, stage.key, attempt, {"summary": summary[:500]}
+            ).id
+        decision = interrupt({"run_id": run_id, "stage": stage.key, "summary": summary})
         raw_dec = (decision or {}).get("decision", "reject")
-        dec: Literal["approve", "reject"] = (
-            "approve" if raw_dec == "approve" else "reject")
+        dec: Literal["approve", "reject"] = "approve" if raw_dec == "approve" else "reject"
         comment = (decision or {}).get("comment", "")
         out = {"decision": dec, "comment": comment}
-        self.store.finish_stage(stage_run_id, status=StageStatus.SUCCEEDED,
-                                output=out)
+        self.store.finish_stage(stage_run_id, status=StageStatus.SUCCEEDED, output=out)
         self.store.add_approval(run_id, stage.key, dec, comment)
         self.store.update_run(
-            run_id, status=RunStatus.RUNNING if dec == "approve" else RunStatus.REJECTED)
+            run_id, status=RunStatus.RUNNING if dec == "approve" else RunStatus.REJECTED
+        )
         return {"stage_outputs": {stage.key: out}, "approval": out}
 
     # ---------- helpers ----------
-    def _build_user_prompt(self, state: HarnessState, stage: StageSpec,
-                           agent: AgentSpec) -> str:
+    def _build_user_prompt(self, state: HarnessState, stage: StageSpec, agent: AgentSpec) -> str:
         outputs = state.get("stage_outputs", {})
         run = self.store.get_run(state["run_id"])
         task = (run.input if run else {}).get("task", "")
         parts = [f"# Task\n{task}"]
         if agent.role == "implementer":
-            feedback = [{"from": k, "output": o}
-                        for k, o in outputs.items()
-                        if k in ("security", "code_review", "qa", "auto_checks")
-                        and "__retry__" not in o]
+            feedback = [
+                {"from": k, "output": o}
+                for k, o in outputs.items()
+                if k in ("security", "code_review", "qa", "auto_checks") and "__retry__" not in o
+            ]
             if feedback:
-                parts.append("# Feedback from review (address these)\n"
-                             + _jsonish(feedback))
+                parts.append("# Feedback from review (address these)\n" + _jsonish(feedback))
         for k, o in outputs.items():
             if k != stage.key and "__retry__" not in o:
                 parts.append(f"# Output of {k}\n{_jsonish(o)[:8000]}")
         if state.get("gmail_message_id"):
             parts.append(f"# gmail_message_id\n{state['gmail_message_id']}")
         if state.get("message_text"):
-            parts.append(f"# Message (untrusted data)\n"
-                         f"{state['message_text'][:8000]}")
+            parts.append(f"# Message (untrusted data)\n{state['message_text'][:8000]}")
         return "\n\n".join(parts)
 
     def _apply_sensors(self, role: str, parsed: dict[str, Any]) -> dict[str, Any]:
         if role in ("reviewer", "security") and "decision" in parsed:
             from ..models import Verdict
+
             try:
                 v = Verdict.model_validate(parsed)
                 return downgrade_approve(filter_findings(v)).model_dump()
@@ -308,26 +325,33 @@ class WorkflowRunner:
         findings = parsed.get("findings")
         if isinstance(findings, list):
             detail["finding_count"] = len(findings)
-            detail["severities"] = [f.get("severity") for f in findings
-                                    if isinstance(f, dict)]
+            detail["severities"] = [f.get("severity") for f in findings if isinstance(f, dict)]
         if parsed.get("summary"):
             detail["summary"] = str(parsed["summary"])[:300]
         return detail
 
     def _approval_summary(self, state: HarnessState) -> str:
         outputs = state.get("stage_outputs", {})
-        return "\n".join([
-            "# PR 요약 (jobMate dev_review)", "",
-            "## What changed",
-            str(outputs.get("analysis", {}).get("requirements", ""))[:500],
-            "", "## 구현 요약",
-            str(outputs.get("implement", {}).get("summary", ""))[:500],
-            "", "## 자동 검사",
-            _checks_summary(outputs.get("auto_checks", {})),
-            "", "## 리뷰/보안 findings",
-            _findings_summary(outputs),
-            "", "## QA 판정",
-            str(outputs.get("qa", {}).get("rationale", ""))[:500]])
+        return "\n".join(
+            [
+                "# PR 요약 (jobMate dev_review)",
+                "",
+                "## What changed",
+                str(outputs.get("analysis", {}).get("requirements", ""))[:500],
+                "",
+                "## 구현 요약",
+                str(outputs.get("implement", {}).get("summary", ""))[:500],
+                "",
+                "## 자동 검사",
+                _checks_summary(outputs.get("auto_checks", {})),
+                "",
+                "## 리뷰/보안 findings",
+                _findings_summary(outputs),
+                "",
+                "## QA 판정",
+                str(outputs.get("qa", {}).get("rationale", ""))[:500],
+            ]
+        )
 
     def _finalize(self, state: HarnessState) -> dict[str, Any]:
         run_id = state["run_id"]
@@ -344,15 +368,15 @@ class WorkflowRunner:
         else:
             status = RunStatus.COMPLETED
         self.store.update_run(run_id, status=status)
-        self.store.audit(run_id, "system", "run_finalized", "",
-                         {"status": status.value, "escalate": escalate})
+        self.store.audit(
+            run_id, "system", "run_finalized", "", {"status": status.value, "escalate": escalate}
+        )
         run = self.store.get_run(run_id)
         if run is not None and self.spec.key == "dev_review":
             meta = dict(run.metadata or {})
             meta["pr_summary"] = self._approval_summary(state)
             self.store.update_run(run_id, metadata=meta)
-            self.store.audit(run_id, "system", "pr_summary", "",
-                             {"chars": len(meta["pr_summary"])})
+            self.store.audit(run_id, "system", "pr_summary", "", {"chars": len(meta["pr_summary"])})
         return {"final_status": status.value}
 
     # ---------- coding tool backend ----------
@@ -363,23 +387,37 @@ class WorkflowRunner:
 
         if self.settings.coding_workspace:
             return self.settings.coding_workspace
-        ws = os.path.join(os.path.dirname(self.settings.db_path)
-                          if isinstance(self.settings.db_path, str)
-                          else str(self.settings.db_path.parent),
-                          "workspaces", run_id)
+        ws = os.path.join(
+            os.path.dirname(self.settings.db_path)
+            if isinstance(self.settings.db_path, str)
+            else str(self.settings.db_path.parent),
+            "workspaces",
+            run_id,
+        )
         if not os.path.exists(os.path.join(ws, ".git")):
             os.makedirs(ws, exist_ok=True)
             subprocess.run(["git", "init", "-q"], cwd=ws, check=True)  # noqa: S603,S607
             subprocess.run(  # noqa: S603
-                ["git", "-c", "user.email=jobmate@local",  # noqa: S607
-                 "-c", "user.name=jobmate",
-                 "commit", "-q", "--allow-empty", "-m", "init"],
-                cwd=ws, check=True)
+                [
+                    "git",
+                    "-c",
+                    "user.email=jobmate@local",  # noqa: S607
+                    "-c",
+                    "user.name=jobmate",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "init",
+                ],
+                cwd=ws,
+                check=True,
+            )
         return ws
 
-    def _coding_complete(self, agent: AgentSpec, system: str, user: str,
-                         state: HarnessState,
-                         schema: Any) -> tuple[dict[str, Any], dict[str, int]]:
+    def _coding_complete(
+        self, agent: AgentSpec, system: str, user: str, state: HarnessState, schema: Any
+    ) -> tuple[dict[str, Any], dict[str, int]]:
         """코딩 CLI 어댑터 실행 → 출력 스키마 dict로 변환."""
         from ..tools.coding import CodingToolError
 
@@ -388,30 +426,29 @@ class WorkflowRunner:
         assert coding is not None  # 호출부에서 coding_tool 설정 시에만 진입
         cwd = self._coding_workspace(run_id)
         prompt = f"{system}\n\n{user}"
-        result = coding.run(
-            prompt=prompt, cwd=cwd,
-            timeout=self.settings.coding_timeout_seconds)
-        self.store.audit(run_id, f"tool:{coding.name}", "invoke",
-                         "", {"exit_code": result.exit_code,
-                              "diff_chars": len(result.diff)})
+        result = coding.run(prompt=prompt, cwd=cwd, timeout=self.settings.coding_timeout_seconds)
+        self.store.audit(
+            run_id,
+            f"tool:{coding.name}",
+            "invoke",
+            "",
+            {"exit_code": result.exit_code, "diff_chars": len(result.diff)},
+        )
         if not result.ok:
-            raise CodingToolError(
-                f"{coding.name} exit={result.exit_code}: "
-                f"{result.text[-300:]}")
+            raise CodingToolError(f"{coding.name} exit={result.exit_code}: {result.text[-300:]}")
         text = result.text.strip()
         summary = text[-2000:] if text else "(no output)"
         done = "DONE" if result.diff.strip() else "DONE_WITH_CONCERNS"
-        data = {"summary": summary, "diff": result.diff,
-                "done_state": done}
+        data = {"summary": summary, "diff": result.diff, "done_state": done}
         if schema is not None and schema.__name__ != "ChangeProposal":
             data = {"result": summary, "done_state": done}
         parsed = schema.model_validate(data) if schema else data
-        return (parsed.model_dump() if hasattr(parsed, "model_dump")
-                else dict(parsed)), {}
+        return (parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)), {}
 
     # ---------- public API ----------
-    def invoke(self, run_id: str, input_data: dict[str, Any],
-               gmail_ctx: dict[str, Any] | None = None) -> HarnessState:
+    def invoke(
+        self, run_id: str, input_data: dict[str, Any], gmail_ctx: dict[str, Any] | None = None
+    ) -> HarnessState:
         state = initial_state(run_id, self.spec.key, gmail_ctx)
         self.store.update_run(run_id, status=RunStatus.RUNNING)
         config = {"configurable": {"thread_id": run_id}}
@@ -424,6 +461,7 @@ class WorkflowRunner:
 
 def _jsonish(obj: Any) -> str:
     import json
+
     try:
         return json.dumps(obj, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
@@ -436,7 +474,9 @@ def _checks_summary(checks_out: dict[str, Any]) -> str:
         return "(none)"
     return "\n".join(
         f"- {c.get('name')}: {'PASS' if c.get('passed') else 'FAIL'}"
-        for c in checks if isinstance(c, dict))
+        for c in checks
+        if isinstance(c, dict)
+    )
 
 
 def _findings_summary(outputs: dict[str, dict[str, Any]]) -> str:

@@ -1,4 +1,5 @@
 """diff 형식·적용 가능성 검사."""
+
 from __future__ import annotations
 
 import re
@@ -26,7 +27,10 @@ def git_apply_check(diff_text: str, repo: Path | None = None) -> tuple[bool, str
     try:
         proc = subprocess.run(  # noqa: S603
             [shutil.which("git") or "git", "apply", "--check", tmp],
-            cwd=repo, capture_output=True, text=True, timeout=30,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return proc.returncode == 0, proc.stderr.strip()[:500]
     except (OSError, subprocess.TimeoutExpired) as e:

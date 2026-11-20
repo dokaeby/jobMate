@@ -1,4 +1,3 @@
-
 from jobmate.adapters.fakes import FakeCalendar, FakeGmail, FakeNotifier
 from jobmate.models import ExtractedEvent, LinkStatus
 from jobmate.sensors import idempotency_key
@@ -9,8 +8,16 @@ from .helpers import make_env, scripted_llm
 
 def _env_with_adapters(**kw):
     settings, store = make_env(**kw)
-    gmail = FakeGmail([{"id": "msg1", "subject": "회의 안내",
-                        "body_text": "내일 오후 3시 회의", "from_addr": "a@b.c"}])
+    gmail = FakeGmail(
+        [
+            {
+                "id": "msg1",
+                "subject": "회의 안내",
+                "body_text": "내일 오후 3시 회의",
+                "from_addr": "a@b.c",
+            }
+        ]
+    )
     cal = FakeCalendar()
     notifier = FakeNotifier()
     adapters = {"gmail": gmail, "calendar": cal, "notifier": notifier}
@@ -18,20 +25,23 @@ def _env_with_adapters(**kw):
 
 
 def _extract_output(**kw):
-    ev = dict(title="팀 회의", start_at="2026-01-05T15:00:00+09:00",
-              end_at="2026-01-05T16:00:00+09:00", timezone="Asia/Seoul",
-              confidence=0.9)
+    ev = dict(
+        title="팀 회의",
+        start_at="2026-01-05T15:00:00+09:00",
+        end_at="2026-01-05T16:00:00+09:00",
+        timezone="Asia/Seoul",
+        confidence=0.9,
+    )
     ev.update(kw)
     return {"ExtractedEvent": [ExtractedEvent(**ev)]}
 
 
 def _run(store, settings, llm, adapters, msg_id="msg1"):
-    run = store.create_run("gmail_calendar", "0.1.0",
-                           {"gmail_message_id": msg_id}, trace_id="t")
-    runner = build_runner("gmail_calendar", store=store, llm=llm,
-                          settings=settings, adapters=adapters)
-    state = runner.invoke(run.id, {"task": "poll"},
-                          gmail_ctx={"gmail_message_id": msg_id})
+    run = store.create_run("gmail_calendar", "0.1.0", {"gmail_message_id": msg_id}, trace_id="t")
+    runner = build_runner(
+        "gmail_calendar", store=store, llm=llm, settings=settings, adapters=adapters
+    )
+    state = runner.invoke(run.id, {"task": "poll"}, gmail_ctx={"gmail_message_id": msg_id})
     return run.id, runner, state
 
 
@@ -83,15 +93,17 @@ def test_calendar_timeout_recovers_via_marker():
     assert links[0].status == LinkStatus.RETRY_WAIT
     # 재시도: marker 조회로 복구 → notify까지
     llm2 = scripted_llm(_extract_output())
-    run2 = store.create_run("gmail_calendar", "0.1.0",
-                            {"gmail_message_id": "msg1"}, trace_id="t2")
-    runner = build_runner("gmail_calendar", store=store, llm=llm2,
-                          settings=settings, adapters=adapters)
-    runner.invoke(run2.id, {"task": "poll"},
-                  gmail_ctx={"gmail_message_id": "msg1"})
+    run2 = store.create_run("gmail_calendar", "0.1.0", {"gmail_message_id": "msg1"}, trace_id="t2")
+    runner = build_runner(
+        "gmail_calendar", store=store, llm=llm2, settings=settings, adapters=adapters
+    )
+    runner.invoke(run2.id, {"task": "poll"}, gmail_ctx={"gmail_message_id": "msg1"})
     link = store.get_link_by_key(idempotency_key("gmail:default", "msg1"))
-    assert link.status in (LinkStatus.NOTIFIED, LinkStatus.CALENDAR_CREATED,
-                           LinkStatus.NOTIFICATION_QUEUED)
+    assert link.status in (
+        LinkStatus.NOTIFIED,
+        LinkStatus.CALENDAR_CREATED,
+        LinkStatus.NOTIFICATION_QUEUED,
+    )
     assert cal.create_calls == 1  # 재생성 없음
 
 
@@ -101,8 +113,7 @@ def test_webpush_sent_on_calendar_register():
 
     class FakePush:
         def send(self, *, title, body, source_url):
-            sent.append({"title": title, "body": body,
-                         "source_url": source_url})
+            sent.append({"title": title, "body": body, "source_url": source_url})
 
     adapters["webpush"] = FakePush()
     llm = scripted_llm(_extract_output())

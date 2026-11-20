@@ -1,4 +1,5 @@
 """코딩 도구 어댑터 단위 테스트."""
+
 import os
 import subprocess
 
@@ -41,8 +42,7 @@ def test_model_passthrough():
 
 
 def test_run_cmd_sets_pwd(tmp_path):
-    code, out = _run_cmd(
-        ["/bin/sh", "-c", 'printf %s "$PWD"'], str(tmp_path), 10)
+    code, out = _run_cmd(["/bin/sh", "-c", 'printf %s "$PWD"'], str(tmp_path), 10)
     assert code == 0
     assert out.strip() == os.path.abspath(str(tmp_path))
 

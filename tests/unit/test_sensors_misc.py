@@ -1,4 +1,3 @@
-
 from jobmate.models import ExtractedEvent
 from jobmate.sensors import (
     build_gmail_url,
@@ -35,9 +34,13 @@ def test_idempotency_key_stable():
 
 
 def _ev(**kw):
-    base = dict(title="회의", start_at="2026-01-01T10:00:00+09:00",
-                end_at="2026-01-01T11:00:00+09:00", timezone="Asia/Seoul",
-                confidence=0.9)
+    base = dict(
+        title="회의",
+        start_at="2026-01-01T10:00:00+09:00",
+        end_at="2026-01-01T11:00:00+09:00",
+        timezone="Asia/Seoul",
+        confidence=0.9,
+    )
     base.update(kw)
     return ExtractedEvent(**base)
 

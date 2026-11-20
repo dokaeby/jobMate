@@ -480,6 +480,48 @@ def create_app(
             c["url"] = f"https://mail.google.com/mail/u/0/#all/{c['source_id']}"
         return {"cards": cards}
 
+    # ---------- settings (대시보드 설정) ----------
+    PREFS_KEY = "prefs"
+
+    def _prefs() -> dict[str, Any]:
+        return store.get_state(PREFS_KEY, {})
+
+    @app.get("/api/v1/settings")
+    def get_prefs() -> dict[str, Any]:
+        p = _prefs()
+        return {
+            "gmail_check_minutes": p.get("gmail_check_minutes", 30),
+            "radar_interval": p.get("radar_interval", "daily"),
+            "coding_tool": p.get("coding_tool") or settings.coding_tool or "none",
+            "coding_model": p.get("coding_model") or settings.coding_model,
+        }
+
+    @app.post("/api/v1/settings")
+    def set_prefs(body: dict[str, Any], request: Request) -> JSONResponse:
+        from ..tools.coding import CODING_TOOLS
+
+        p = _prefs()
+        minutes = int(body.get("gmail_check_minutes", p.get("gmail_check_minutes", 30)))
+        if minutes not in (30, 60):
+            return err(422, "validation", "gmail_check_minutes must be 30 or 60", request)
+        interval = str(body.get("radar_interval", p.get("radar_interval", "daily")))
+        if interval not in ("daily", "weekly"):
+            return err(422, "validation", "radar_interval must be daily or weekly", request)
+        tool = str(body.get("coding_tool", p.get("coding_tool", "")))
+        if tool and tool != "none" and tool not in CODING_TOOLS:
+            return err(422, "validation", f"unknown coding tool: {tool}", request)
+        p.update(
+            {
+                "gmail_check_minutes": minutes,
+                "radar_interval": interval,
+                "coding_tool": tool or "none",
+                "coding_model": str(body.get("coding_model", p.get("coding_model", "")))[:100],
+            }
+        )
+        store.set_state(PREFS_KEY, p)
+        cronjob = _sync_cronjob(settings, p)
+        return JSONResponse(content={"ok": True, "prefs": p, "cronjob": cronjob})
+
     # ---------- coding tool (코드 어댑터) ----------
     coding_jobs: dict[str, dict[str, Any]] = {}
     coding_jobs_lock = threading.Lock()
@@ -521,6 +563,7 @@ def create_app(
     def coding_tools() -> dict[str, Any]:
         from ..tools.coding import CODING_TOOLS, build_coding_tool
 
+        default_tool = _prefs().get("coding_tool") or settings.coding_tool or "none"
         tools = []
         for n in CODING_TOOLS:
             t = build_coding_tool(n)
@@ -528,16 +571,20 @@ def create_app(
                 {
                     "name": n,
                     "available": bool(t and t.available()),
-                    "default": n == settings.coding_tool,
+                    "default": n == default_tool,
                 }
             )
-        return {"tools": tools, "default_model": settings.coding_model}
+        return {
+            "tools": tools,
+            "default_model": _prefs().get("coding_model") or settings.coding_model,
+        }
 
     @app.post("/api/v1/coding/run")
     def coding_run(body: dict[str, Any], request: Request) -> JSONResponse:
         from ..tools.coding import build_coding_tool
 
-        tool_name = str(body.get("tool") or settings.coding_tool)
+        pref_tool = _prefs().get("coding_tool")
+        tool_name = str(body.get("tool") or pref_tool or settings.coding_tool)
         task = str(body.get("task") or "").strip()
         if not task:
             return err(422, "validation", "task is required", request)
@@ -714,6 +761,41 @@ def create_app(
 # ---------- automation worker ----------
 
 
+def _sync_cronjob(settings: Settings, prefs: dict[str, Any]) -> dict[str, str]:
+    """prefs를 cron-job.org 실제 스케줄에 반영. 미설정/실패는 상태 문자열로 반환."""
+    import os
+
+    from ..adapters.cronjob import CronJobOrgClient, daily_at, interval_schedule, weekly_at
+
+    api_key = os.environ.get(settings.cronjob_api_key_env, "")
+    out: dict[str, str] = {}
+
+    def push(job_id: str, schedule: dict[str, Any], label: str) -> None:
+        if not job_id:
+            out[label] = "skipped(no job id)"
+        elif not api_key:
+            out[label] = "skipped(no api key)"
+        else:
+            try:
+                CronJobOrgClient(api_key, job_id, settings.cronjob_base_url).update_schedule(
+                    schedule
+                )
+                out[label] = "updated"
+            except Exception as e:
+                out[label] = f"error: {str(e)[:120]}"
+
+    push(
+        settings.cronjob_job_id,
+        interval_schedule(int(prefs.get("gmail_check_minutes", 30))),
+        "email",
+    )
+    radar_schedule = (
+        weekly_at(6, 0, wday=1) if prefs.get("radar_interval") == "weekly" else daily_at(6, 0)
+    )
+    push(settings.cronjob_radar_job_id, radar_schedule, "radar")
+    return out
+
+
 def _automation_loop(
     store: Store, settings: Settings, llm: Any, adapters: dict[str, Any], stop: threading.Event
 ) -> None:
@@ -812,10 +894,13 @@ def _maybe_poll_gmail(store: Store, settings: Settings, adapters: dict[str, Any]
     if not auto.get("enabled"):
         return
     last = auto.get("last_gmail_poll_at")
+    prefs = store.get_state("prefs", {})
+    minutes = int(prefs.get("gmail_check_minutes") or 0)
+    interval_secs = minutes * 60 if minutes in (30, 60) else settings.gmail_poll_interval_seconds
     if last:
         try:
             prev = datetime.fromisoformat(last)
-            if datetime.now(UTC) - prev < timedelta(seconds=settings.gmail_poll_interval_seconds):
+            if datetime.now(UTC) - prev < timedelta(seconds=interval_secs):
                 return
         except ValueError:
             pass
@@ -857,8 +942,18 @@ def _maybe_daily_radar(
         return
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
     today = now_kst.date().isoformat()
-    if now_kst.hour < 6 or auto.get("last_radar_date") == today:
+    if now_kst.hour < 6:
         return
+    prefs = store.get_state("prefs", {})
+    last_radar = auto.get("last_radar_date")
+    if last_radar == today:
+        return
+    if prefs.get("radar_interval") == "weekly" and last_radar:
+        try:
+            if (now_kst.date() - datetime.fromisoformat(last_radar).date()).days < 7:
+                return
+        except ValueError:
+            pass
     if adapters.get("github") is None:
         return
     for p in settings.radar_platforms:

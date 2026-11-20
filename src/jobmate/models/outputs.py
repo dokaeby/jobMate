@@ -1,4 +1,5 @@
 """LLM 단계 출력 스키마 — 경계 검증용 Pydantic 모델."""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -58,7 +59,7 @@ class ExtractedEvent(BaseModel):
     """Gmail 일정 추출 후보."""
 
     title: str
-    start_at: str            # ISO 8601
+    start_at: str  # ISO 8601
     end_at: str
     timezone: str = "Asia/Seoul"
     location: str = ""
@@ -76,7 +77,7 @@ class RepoSummary(BaseModel):
     summary_ko: str
     taxonomy: str = ""
     taxonomy_confidence: float = 0.0
-    summary_status: str = "ok"   # ok|fallback|failed
+    summary_status: str = "ok"  # ok|fallback|failed
 
 
 class GenericOutput(BaseModel):

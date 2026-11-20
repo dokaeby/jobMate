@@ -1,4 +1,5 @@
 """Gmail 원본 링크 안전 생성 — 임의 리다이렉트 차단."""
+
 from __future__ import annotations
 
 ALLOWED_HOSTS = {"mail.google.com"}

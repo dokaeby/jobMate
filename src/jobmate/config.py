@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     langsmith_api_key_env: str = "LANGSMITH_API_KEY"
     langsmith_project: str = "jobmate"
 
+    # cron-job.org — 대시보드 설정을 실제 cron 스케줄에 반영
+    cronjob_api_key_env: str = "CRONJOB_ORG_API_KEY"
+    cronjob_base_url: str = "https://api.cron-job.org"
+    cronjob_job_id: str = ""  # 이메일 체크 job id (JOBMATE_CRONJOB_JOB_ID)
+    cronjob_radar_job_id: str = ""  # 레이더 수집 job id (선택)
+
     def model_for(self, role: str, tier: str = "default") -> ModelConfig:
         """역할별 오버라이드 → 티어 기본값 순으로 ModelConfig를 만든다.
         debug 모드에서는 tier와 무관하게 항상 default(gemini)만 사용한다."""

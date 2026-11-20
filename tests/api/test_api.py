@@ -160,3 +160,33 @@ def test_coding_tools_and_run_validation():
     assert r.status_code == 422
     r = client.get("/api/v1/coding/jobs/nonexistent")
     assert r.status_code == 404
+
+
+def test_settings_prefs_roundtrip():
+    client, store = _client()
+    r = client.get("/api/v1/settings")
+    assert r.status_code == 200
+    assert r.json()["gmail_check_minutes"] == 30
+
+    r = client.post(
+        "/api/v1/settings",
+        json={
+            "gmail_check_minutes": 60,
+            "radar_interval": "weekly",
+            "coding_tool": "codex",
+            "coding_model": "gpt-5",
+        },
+    )
+    assert r.status_code == 200
+    d = client.get("/api/v1/settings").json()
+    assert d["gmail_check_minutes"] == 60
+    assert d["radar_interval"] == "weekly"
+    assert d["coding_tool"] == "codex"
+    assert d["coding_model"] == "gpt-5"
+    # 영속화 확인
+    assert store.get_state("prefs")["radar_interval"] == "weekly"
+
+    r = client.post("/api/v1/settings", json={"gmail_check_minutes": 15})
+    assert r.status_code == 422
+    r = client.post("/api/v1/settings", json={"coding_tool": "bogus"})
+    assert r.status_code == 422

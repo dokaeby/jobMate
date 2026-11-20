@@ -1,4 +1,5 @@
 """LangGraph 상태 — run 누적 컨텍스트. 모두 JSON 직렬화 가능해야 한다."""
+
 from __future__ import annotations
 
 import time
@@ -26,24 +27,25 @@ class HarnessState(TypedDict, total=False):
     cost_usd: float
     started_at: float
     # 제어 플래그
-    escalate: str          # needs_human|budget_exhausted|failed|""
+    escalate: str  # needs_human|budget_exhausted|failed|""
     approval: dict[str, Any]
     final_status: str
     # 메시지 인테이크 컨텍스트 (calendar 계열 워크플로)
     gmail_message_id: str
     connection_id: str
-    source_provider: str     # gmail|slack|telegram
+    source_provider: str  # gmail|slack|telegram
     source_id: str
     thread_id: str
     source_url: str
     message_text: str
     # skill_radar 컨텍스트
-    platform: str            # claude|chatgpt|gemini|all
+    platform: str  # claude|chatgpt|gemini|all
     force: bool
 
 
-def initial_state(run_id: str, workflow_key: str,
-                  gmail_ctx: dict[str, Any] | None = None) -> HarnessState:
+def initial_state(
+    run_id: str, workflow_key: str, gmail_ctx: dict[str, Any] | None = None
+) -> HarnessState:
     s: HarnessState = {
         "run_id": run_id,
         "workflow_key": workflow_key,

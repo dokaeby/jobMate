@@ -1,4 +1,5 @@
 """워크플로/에이전트 레지스트리 — 버전 고정 spec 조회."""
+
 from __future__ import annotations
 
 from ..models import AgentSpec, ModelConfig, WorkflowSpec
@@ -25,30 +26,61 @@ class Registry:
         return list(self._workflows.values())
 
 
-def default_agents(model_default: ModelConfig,
-                   model_important: ModelConfig) -> dict[str, AgentSpec]:
+def default_agents(
+    model_default: ModelConfig, model_important: ModelConfig
+) -> dict[str, AgentSpec]:
     """dev_review용 기본 에이전트 스펙. 모델은 Settings에서 주입."""
     return {
         "analysis": AgentSpec(
-            key="analysis", role="analysis", prompt="analysis",
-            output_schema="AnalysisResult", model=model_default, tier="default"),
+            key="analysis",
+            role="analysis",
+            prompt="analysis",
+            output_schema="AnalysisResult",
+            model=model_default,
+            tier="default",
+        ),
         "implementer": AgentSpec(
-            key="implementer", role="implementer", prompt="implementer",
-            output_schema="ChangeProposal", model=model_important, tier="important",
-            tools=["read_file", "read_diff"]),
+            key="implementer",
+            role="implementer",
+            prompt="implementer",
+            output_schema="ChangeProposal",
+            model=model_important,
+            tier="important",
+            tools=["read_file", "read_diff"],
+        ),
         "security": AgentSpec(
-            key="security", role="security", prompt="security_review",
-            output_schema="Verdict", model=model_important, tier="important",
-            tools=["read_diff"]),
+            key="security",
+            role="security",
+            prompt="security_review",
+            output_schema="Verdict",
+            model=model_important,
+            tier="important",
+            tools=["read_diff"],
+        ),
         "reviewer": AgentSpec(
-            key="reviewer", role="reviewer", prompt="code_review",
-            output_schema="Verdict", model=model_important, tier="important",
-            tools=["read_diff"]),
+            key="reviewer",
+            role="reviewer",
+            prompt="code_review",
+            output_schema="Verdict",
+            model=model_important,
+            tier="important",
+            tools=["read_diff"],
+        ),
         "qa": AgentSpec(
-            key="qa", role="qa", prompt="qa",
-            output_schema="QaVerdict", model=model_important, tier="important",
-            tools=["read_diff", "run_tests"]),
+            key="qa",
+            role="qa",
+            prompt="qa",
+            output_schema="QaVerdict",
+            model=model_important,
+            tier="important",
+            tools=["read_diff", "run_tests"],
+        ),
         "extractor": AgentSpec(
-            key="extractor", role="extractor", prompt="event_extract",
-            output_schema="ExtractedEvent", model=model_default, tier="default"),
+            key="extractor",
+            role="extractor",
+            prompt="event_extract",
+            output_schema="ExtractedEvent",
+            model=model_default,
+            tier="default",
+        ),
     }

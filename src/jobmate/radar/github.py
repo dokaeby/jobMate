@@ -1,4 +1,5 @@
 """skillRadar 포팅 — GitHub 수집 클라이언트 (동기 httpx, 재시도/backoff)."""
+
 from __future__ import annotations
 
 import base64
@@ -44,6 +45,7 @@ def load_queries(path: Path | None = None) -> dict[str, list[str]]:
 
 def content_hash(description: str | None, readme: str) -> str:
     import hashlib
+
     raw = f"{description or ''}\n{readme}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
@@ -57,16 +59,16 @@ def stars_delta(current: int, previous: int | None) -> int | None:
 class GitHubAPI:
     """GitHub Search/Contents 얇은 래퍼 — Protocol GitHubClient 구현."""
 
-    def __init__(self, token: str = "", timeout: float = 20.0,
-                 max_retries: int = 3, backoff: float = 2.0) -> None:
+    def __init__(
+        self, token: str = "", timeout: float = 20.0, max_retries: int = 3, backoff: float = 2.0
+    ) -> None:
         self._token = token
         self._client = httpx.Client(timeout=timeout)
         self._max_retries = max_retries
         self._backoff = backoff
 
     def _headers(self) -> dict[str, str]:
-        h = {"Accept": "application/vnd.github+json",
-             "X-GitHub-Api-Version": "2022-11-28"}
+        h = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if self._token:
             h["Authorization"] = f"Bearer {self._token}"
         return h
@@ -75,8 +77,7 @@ class GitHubAPI:
         delay = self._backoff
         for attempt in range(self._max_retries + 1):
             try:
-                resp = self._client.get(url, params=params,
-                                        headers=self._headers())
+                resp = self._client.get(url, params=params, headers=self._headers())
             except httpx.HTTPError:
                 if attempt == self._max_retries:
                     return None
@@ -95,28 +96,29 @@ class GitHubAPI:
             return None
         return None
 
-    def search_repositories(self, query: str,
-                            per_page: int = 30) -> list[dict[str, Any]]:
-        data = self._get_json(SEARCH_URL, params={
-            "q": query, "sort": "stars", "order": "desc",
-            "per_page": per_page})
+    def search_repositories(self, query: str, per_page: int = 30) -> list[dict[str, Any]]:
+        data = self._get_json(
+            SEARCH_URL, params={"q": query, "sort": "stars", "order": "desc", "per_page": per_page}
+        )
         if not data:
             return []
         hits = []
         for item in data.get("items", []):
             if item.get("archived") or item.get("fork"):
                 continue
-            hits.append({
-                "full_name": item.get("full_name", ""),
-                "html_url": item.get("html_url", ""),
-                "description": item.get("description"),
-                "stars": int(item.get("stargazers_count", 0)),
-                "language": item.get("language"),
-                "topics": list(item.get("topics") or []),
-                "archived": bool(item.get("archived")),
-                "fork": bool(item.get("fork")),
-                "license": (item.get("license") or {}).get("spdx_id"),
-            })
+            hits.append(
+                {
+                    "full_name": item.get("full_name", ""),
+                    "html_url": item.get("html_url", ""),
+                    "description": item.get("description"),
+                    "stars": int(item.get("stargazers_count", 0)),
+                    "language": item.get("language"),
+                    "topics": list(item.get("topics") or []),
+                    "archived": bool(item.get("archived")),
+                    "fork": bool(item.get("fork")),
+                    "license": (item.get("license") or {}).get("spdx_id"),
+                }
+            )
         return hits
 
     def fetch_readme(self, full_name: str) -> str:
@@ -124,9 +126,10 @@ class GitHubAPI:
         # raw 미디어 타입으로 요청 — 실패 시 JSON content(base64) 디코딩 폴백
         try:
             resp = self._client.get(
-                url, headers={**self._headers(),
-                              "Accept": "application/vnd.github.raw"},
-                follow_redirects=True)
+                url,
+                headers={**self._headers(), "Accept": "application/vnd.github.raw"},
+                follow_redirects=True,
+            )
             if resp.status_code == 200 and resp.text:
                 return resp.text[:MAX_README_CHARS]
         except httpx.HTTPError:
@@ -135,8 +138,9 @@ class GitHubAPI:
         if not data:
             return ""
         try:
-            return base64.b64decode(data.get("content") or "").decode(
-                "utf-8", errors="replace")[:MAX_README_CHARS]
+            return base64.b64decode(data.get("content") or "").decode("utf-8", errors="replace")[
+                :MAX_README_CHARS
+            ]
         except Exception:
             return ""
 

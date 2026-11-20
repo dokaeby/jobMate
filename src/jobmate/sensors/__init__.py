@@ -10,9 +10,17 @@ from .webhook_auth import (
 )
 
 __all__ = [
-    "allowed_identifier", "build_gmail_url", "downgrade_approve",
-    "filter_findings", "git_apply_check", "has_blocking_findings",
-    "idempotency_key", "is_safe_source_url", "looks_like_diff",
-    "scan_secrets", "validate_event", "verify_slack_signature",
+    "allowed_identifier",
+    "build_gmail_url",
+    "downgrade_approve",
+    "filter_findings",
+    "git_apply_check",
+    "has_blocking_findings",
+    "idempotency_key",
+    "is_safe_source_url",
+    "looks_like_diff",
+    "scan_secrets",
+    "validate_event",
+    "verify_slack_signature",
     "verify_telegram_secret",
 ]

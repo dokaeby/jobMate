@@ -999,6 +999,21 @@ class Store:
                 (json.dumps(data),),
             )
 
+    # ---- 범용 상태 (automation_state key/value) ----
+    def get_state(self, key: str, default: dict[str, Any] | None = None) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT value FROM automation_state WHERE key=?", (key,)
+        ).fetchone()
+        return _loads(row["value"]) if row else (default or {})
+
+    def set_state(self, key: str, data: dict[str, Any]) -> None:
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO automation_state(key,value) VALUES(?,?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, json.dumps(data)),
+            )
+
     # ---- message_extractions (멀티채널 수신함) ----
     def save_message_extraction(
         self,
