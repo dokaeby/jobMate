@@ -285,6 +285,7 @@ def gmail_notify(ctx: FunctionContext) -> dict[str, Any]:
         ctx.store.update_link(link.id, status=LinkStatus.NOTIFIED,
                               notification_id=n.id)
         jobs = _schedule_event_notifications(ctx, ev, reg)
+        _send_web_push(ctx, n)
         return {"status": "notified", "notification_id": n.id,
                 "notification_jobs": jobs}
     except Exception as e:
@@ -295,6 +296,18 @@ def gmail_notify(ctx: FunctionContext) -> dict[str, Any]:
                         {"error": str(e)[:200]})
         return {"status": "notify_failed", "notification_id": n.id,
                 "error": str(e)[:300]}
+
+
+def _send_web_push(ctx: FunctionContext, n: Any) -> None:
+    """Web Push 채널 — best-effort. 실패해도 알림 상태는 SENT 유지."""
+    push = ctx.adapters.get("webpush")
+    if push is None:
+        return
+    try:
+        push.send(title=n.title, body=n.body, source_url=n.source_url)
+    except Exception as e:
+        ctx.store.audit(ctx.run_id, "tool", "webpush_failed", str(n.id),
+                        {"error": str(e)[:200]})
 
 
 def _schedule_event_notifications(ctx: FunctionContext,

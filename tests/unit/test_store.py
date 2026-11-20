@@ -58,3 +58,19 @@ def test_audit_redaction_safe():
             {"decision": "approve", "finding_count": 2})
     events = s.get_audit(r.id)
     assert any(e.action == "verdict" for e in events)
+
+
+def test_pg_translate():
+    from jobmate.store.db import _is_pg_dsn, _pg_translate
+    assert _is_pg_dsn("postgres://u:p@h/db")
+    assert _is_pg_dsn("postgresql://u:p@h/db")
+    assert not _is_pg_dsn("data/jobmate.db")
+    out = _pg_translate(
+        "INSERT OR IGNORE INTO t(a,b) VALUES(?,?)")
+    assert out == "INSERT INTO t(a,b) VALUES(%s,%s) ON CONFLICT DO NOTHING"
+    out = _pg_translate(
+        "INSERT OR IGNORE INTO t(a) VALUES(?) RETURNING id")
+    assert out == ("INSERT INTO t(a) VALUES(%s) "
+                   "ON CONFLICT DO NOTHING RETURNING id")
+    out = _pg_translate("SELECT * FROM t WHERE a=? AND b<=?")
+    assert out == "SELECT * FROM t WHERE a=%s AND b<=%s"

@@ -1,4 +1,5 @@
 """코딩 도구 어댑터 단위 테스트."""
+import os
 import subprocess
 
 import pytest
@@ -9,6 +10,7 @@ from jobmate.tools.coding import (
     CodexCodingTool,
     CodingToolError,
     OpenCodeCodingTool,
+    _run_cmd,
     build_coding_tool,
     workspace_diff,
 )
@@ -23,8 +25,26 @@ def _git(ws, *args):
 def test_argv_shapes():
     assert ClaudeCodingTool().argv("do it")[:2] == ["claude", "-p"]
     assert CodexCodingTool().argv("do it")[:3] == ["codex", "exec", "--sandbox"]
-    assert AntigravityCodingTool().argv("do it")[:3] == ["agy", "--print", "--mode"]
+    argv = AntigravityCodingTool().argv("do it")
+    assert argv[0] == "agy" and argv[1].startswith("--print=do it")
+    assert "--dangerously-skip-permissions" in argv
+    assert "--sandbox" in argv
     assert OpenCodeCodingTool().argv("do it")[:3] == ["opencode", "run", "--auto"]
+
+
+def test_model_passthrough():
+    assert "--model" not in " ".join(CodexCodingTool().argv("x"))
+    argv = OpenCodeCodingTool(model="opencode/big-pickle").argv("x")
+    assert argv[argv.index("--model") + 1] == "opencode/big-pickle"
+    agy = AntigravityCodingTool(model="gpt-x").argv("x")
+    assert "--model" in agy and agy[agy.index("--model") + 1] == "gpt-x"
+
+
+def test_run_cmd_sets_pwd(tmp_path):
+    code, out = _run_cmd(
+        ["/bin/sh", "-c", 'printf %s "$PWD"'], str(tmp_path), 10)
+    assert code == 0
+    assert out.strip() == os.path.abspath(str(tmp_path))
 
 
 def test_build_coding_tool_unknown():

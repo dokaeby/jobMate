@@ -1,6 +1,8 @@
 """환경 설정 — pydantic-settings. 비밀값은 env 이름만 참조한다."""
+
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -15,6 +17,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="JOBMATE_", env_file=".env", extra="ignore")
 
     db_path: Path = Path("data/jobmate.db")
+    # postgres(ql):// DSN — 설정 시 db_path 대신 PostgreSQL 사용 (Vercel/Neon 등)
+    database_url: str = ""
     # debug: 모든 역할 gemini만. release: 가벼운 작업=gemini, 중요 작업=codex
     mode: Literal["debug", "release"] = "debug"
     default_model: str = "gemini-3.5-flash-lite"
@@ -51,8 +55,7 @@ class Settings(BaseSettings):
 
     # skillRadar 수집
     github_token_env: str = "GITHUB_TOKEN"  # noqa: S105 - env 변수 "이름"이지 비밀값이 아님
-    radar_platforms: list[str] = Field(
-        default_factory=lambda: ["claude", "chatgpt", "gemini"])
+    radar_platforms: list[str] = Field(default_factory=lambda: ["claude", "chatgpt", "gemini"])
     radar_per_query: int = 10
     radar_max_repos: int = 30
     radar_queries_path: Path | None = None
@@ -60,7 +63,8 @@ class Settings(BaseSettings):
     # 코딩 도구 어댑터 — implementer 단계를 CLI 코딩 에이전트로 실행
     # none|claude|codex|antigravity|opencode
     coding_tool: str = "none"
-    coding_workspace: str = ""        # 비우면 data/workspaces/<run_id>에 git repo 생성
+    coding_model: str = ""  # 비우면 각 CLI 기본 모델
+    coding_workspace: str = ""  # 비우면 data/workspaces/<run_id>에 git repo 생성
     coding_timeout_seconds: float = 600.0
 
     def model_for(self, role: str, tier: str = "default") -> ModelConfig:
@@ -70,18 +74,38 @@ class Settings(BaseSettings):
             tier = "default"
         override = self.role_models.get(role)
         if override == "important":
-            return ModelConfig(model=self.important_model, base_url=self.codex_base_url,
-                               api_key_env=self.codex_api_key_env,
-                               provider="codex")
+            return ModelConfig(
+                model=self.important_model,
+                base_url=self.codex_base_url,
+                api_key_env=self.codex_api_key_env,
+                provider="codex",
+            )
         if override == "default":
-            return ModelConfig(model=self.default_model, base_url=self.llm_base_url,
-                               api_key_env=self.llm_api_key_env)
+            return ModelConfig(
+                model=self.default_model,
+                base_url=self.llm_base_url,
+                api_key_env=self.llm_api_key_env,
+            )
         if tier == "important":
-            return ModelConfig(model=self.important_model, base_url=self.codex_base_url,
-                               api_key_env=self.codex_api_key_env,
-                               provider="codex")
-        return ModelConfig(model=self.default_model, base_url=self.llm_base_url,
-                           api_key_env=self.llm_api_key_env)
+            return ModelConfig(
+                model=self.important_model,
+                base_url=self.codex_base_url,
+                api_key_env=self.codex_api_key_env,
+                provider="codex",
+            )
+        return ModelConfig(
+            model=self.default_model, base_url=self.llm_base_url, api_key_env=self.llm_api_key_env
+        )
+
+
+def database_dsn(settings: Settings) -> str:
+    """Store에 넘길 DSN/경로. Vercel Postgres(POSTGRES_URL)도 인식."""
+    return (
+        settings.database_url
+        or os.environ.get("POSTGRES_URL", "")
+        or os.environ.get("POSTGRES_PRISMA_URL", "")
+        or str(settings.db_path)
+    )
 
 
 @lru_cache

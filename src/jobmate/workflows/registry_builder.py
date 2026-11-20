@@ -45,7 +45,8 @@ def build_runner(workflow_key: str, *, store: Store, llm: LLMClient,
     cp = build_checkpointer(str(settings.db_path) + ".checkpoints")
     coding_tool = coding
     if coding_tool is None and settings.coding_tool != "none":
-        coding_tool = build_coding_tool(settings.coding_tool)
+        coding_tool = build_coding_tool(
+            settings.coding_tool, model=settings.coding_model or None)
     return WorkflowRunner(
         spec=spec, registry=reg, store=store, llm=llm,
         tools=tools or ToolExecutor(repo_root="."), settings=settings,

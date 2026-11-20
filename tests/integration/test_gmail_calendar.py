@@ -95,6 +95,22 @@ def test_calendar_timeout_recovers_via_marker():
     assert cal.create_calls == 1  # 재생성 없음
 
 
+def test_webpush_sent_on_calendar_register():
+    settings, store, gmail, cal, notifier, adapters = _env_with_adapters()
+    sent = []
+
+    class FakePush:
+        def send(self, *, title, body, source_url):
+            sent.append({"title": title, "body": body,
+                         "source_url": source_url})
+
+    adapters["webpush"] = FakePush()
+    llm = scripted_llm(_extract_output())
+    _run(store, settings, llm, adapters)
+    assert len(sent) == 1
+    assert sent[0]["title"].startswith("일정 등록")
+
+
 def test_notify_failure_keeps_calendar_event():
     settings, store, gmail, cal, notifier, adapters = _env_with_adapters()
     notifier.fail = True

@@ -1,11 +1,12 @@
 """jobMate CLI — run 제출/조회/승인, gmail 상태."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 
-from .config import get_settings
+from .config import database_dsn, get_settings
 from .llm import CompositeLLM
 from .models import RunStatus
 from .store.db import Store
@@ -20,9 +21,12 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("run", help="dev_review run 실행 (동기)")
     sp.add_argument("task")
     sp.add_argument("--workflow", default="dev_review")
-    sp.add_argument("--coding-tool", default=None,
-                    choices=["none", "claude", "codex", "antigravity",
-                             "opencode"])
+    sp.add_argument(
+        "--coding-tool",
+        default=None,
+        choices=["none", "claude", "codex", "antigravity", "opencode"],
+    )
+    sp.add_argument("--coding-model", default=None)
 
     sp = sub.add_parser("status", help="run 상태 조회")
     sp.add_argument("run_id")
@@ -37,10 +41,23 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("decision", choices=["approve", "reject"])
 
     sp = sub.add_parser("workflows", help="등록된 워크플로 목록")
+
+    sp = sub.add_parser("google-auth", help="Google OAuth 토큰 발급 (gmail/calendar)")
+    sp.add_argument("kind", choices=["gmail", "calendar"])
+    sp.add_argument(
+        "--credentials",
+        default=None,
+        help="OAuth client JSON(credentials.json) 경로 — --client-id/--client-secret 대신 사용",
+    )
+    sp.add_argument("--client-id", default=None)
+    sp.add_argument("--client-secret", default=None)
+    sp.add_argument(
+        "--token-path", required=True, help="토큰 JSON 저장 경로 (예: data/google-gmail.json)"
+    )
     args = p.parse_args(argv)
 
     settings = get_settings()
-    store = Store(settings.db_path)
+    store = Store(database_dsn(settings))
     llm = CompositeLLM()
 
     if args.cmd == "workflows":
@@ -48,22 +65,51 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{w.key} v{w.version}")
         return 0
 
+    if args.cmd == "google-auth":
+        from .adapters.google import GoogleAuthError, issue_token, load_client_credentials
+
+        try:
+            if args.credentials:
+                cid, csec = load_client_credentials(args.credentials)
+            elif args.client_id and args.client_secret:
+                cid, csec = args.client_id, args.client_secret
+            else:
+                print("--credentials 또는 --client-id/--client-secret 필요", file=sys.stderr)
+                return 1
+            path = issue_token(
+                args.kind, client_id=cid, client_secret=csec, token_path=args.token_path
+            )
+        except (GoogleAuthError, OSError, KeyError, ValueError) as e:
+            print(f"google-auth failed: {e}", file=sys.stderr)
+            return 1
+        print(f"token saved: {path}")
+        return 0
+
     if args.cmd == "run":
         if getattr(args, "coding_tool", None):
-            settings = settings.model_copy(
-                update={"coding_tool": args.coding_tool})
-        run = store.create_run(args.workflow, WORKFLOWS[args.workflow].version,
-                               {"task": args.task}, trace_id="cli")
-        runner = build_runner(args.workflow, store=store, llm=llm,
-                              settings=settings)
+            update = {"coding_tool": args.coding_tool}
+            if args.coding_model:
+                update["coding_model"] = args.coding_model
+            settings = settings.model_copy(update=update)
+        run = store.create_run(
+            args.workflow, WORKFLOWS[args.workflow].version, {"task": args.task}, trace_id="cli"
+        )
+        runner = build_runner(args.workflow, store=store, llm=llm, settings=settings)
         try:
             runner.invoke(run.id, {"task": args.task})
         except Exception as e:
             store.update_run(run.id, status=RunStatus.FAILED, error=str(e)[:300])
         r = store.get_run(run.id)
-        print(json.dumps({"id": run.id,
-                          "status": r.status.value if r else "?",
-                          "error": r.error if r else ""}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "id": run.id,
+                    "status": r.status.value if r else "?",
+                    "error": r.error if r else "",
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     if args.cmd == "status":
@@ -71,9 +117,16 @@ def main(argv: list[str] | None = None) -> int:
         if not r:
             print("not found", file=sys.stderr)
             return 1
-        print(json.dumps({"id": r.id, "status": r.status.value,
-                          "stages": [s.stage_key for s in store.get_stage_runs(r.id)]},
-                         ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "id": r.id,
+                    "status": r.status.value,
+                    "stages": [s.stage_key for s in store.get_stage_runs(r.id)],
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     if args.cmd in ("approve", "resume"):
@@ -81,13 +134,10 @@ def main(argv: list[str] | None = None) -> int:
         if not r:
             print("not found", file=sys.stderr)
             return 1
-        runner = build_runner(r.workflow_key, store=store, llm=llm,
-                              settings=settings)
-        runner.resume(r.id, {"decision": args.decision,
-                             "comment": getattr(args, "comment", "")})
+        runner = build_runner(r.workflow_key, store=store, llm=llm, settings=settings)
+        runner.resume(r.id, {"decision": args.decision, "comment": getattr(args, "comment", "")})
         r2 = store.get_run(r.id)
-        print(json.dumps({"id": r.id,
-                          "status": r2.status.value if r2 else "?"}))
+        print(json.dumps({"id": r.id, "status": r2.status.value if r2 else "?"}))
         return 0
 
     return 1

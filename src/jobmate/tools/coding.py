@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -42,8 +43,13 @@ class CodingToolError(Exception):
 
 def _run_cmd(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]:
     try:
+        # subprocess cwd= 는 PWD 환경변수를 갱신하지 않는다. opencode 등
+        # $PWD를 작업 디렉터리로 쓰는 CLI가 부모 셸의 디렉터리에 쓰는 것을
+        # 막기 위해 명시적으로 설정한다.
+        env = {**os.environ, "PWD": os.path.abspath(cwd)}
         proc = subprocess.run(  # noqa: S603
-            argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+            argv, cwd=cwd, env=env, capture_output=True, text=True,
+            timeout=timeout)
     except FileNotFoundError as e:
         raise CodingToolError(f"{argv[0]} not found") from e
     except subprocess.TimeoutExpired as e:
@@ -87,6 +93,13 @@ class _CliCodingTool:
     binary = ""
     name = ""
 
+    def __init__(self, model: str | None = None) -> None:
+        self.model = model
+
+    def _model_args(self) -> list[str]:
+        # 네 CLI 모두 --model <value> 형태를 지원한다
+        return ["--model", self.model] if self.model else []
+
     def argv(self, prompt: str) -> list[str]:  # pragma: no cover - override
         raise NotImplementedError
 
@@ -103,14 +116,18 @@ class _CliCodingTool:
 
 
 class ClaudeCodingTool(_CliCodingTool):
-    """Claude Code 헤드리스: claude -p --output-format text"""
+    """Claude Code 헤드리스: claude -p --output-format text.
+
+    헤드리스에서는 권한 프롬프트를 응답할 수 없어 bypassPermissions가
+    필요하다(acceptEdits는 Edit/Write만 허용하고 Bash 등을 거부).
+    """
 
     binary = "claude"
     name = "claude"
 
     def argv(self, prompt: str) -> list[str]:
         return ["claude", "-p", prompt, "--output-format", "text",
-                "--permission-mode", "acceptEdits"]
+                "--permission-mode", "bypassPermissions", *self._model_args()]
 
 
 class CodexCodingTool(_CliCodingTool):
@@ -120,17 +137,24 @@ class CodexCodingTool(_CliCodingTool):
     name = "codex"
 
     def argv(self, prompt: str) -> list[str]:
-        return ["codex", "exec", "--sandbox", "workspace-write", prompt]
+        return ["codex", "exec", "--sandbox", "workspace-write",
+                *self._model_args(), prompt]
 
 
 class AntigravityCodingTool(_CliCodingTool):
-    """Antigravity CLI(agy) 헤드리스: agy --print --mode auto"""
+    """Antigravity CLI(agy) 헤드리스: agy --print=<prompt>.
+
+    --print는 프롬프트를 플래그 값으로 받는다(위치 인자 불가).
+    헤드리스에서는 권한 프롬프트를 띄울 수 없어 모든 도구 권한을
+    자동 승인해야 하며, --sandbox로 터미널 실행을 작업 디렉터리로 제한한다.
+    """
 
     binary = "agy"
     name = "antigravity"
 
     def argv(self, prompt: str) -> list[str]:
-        return ["agy", "--print", "--mode", "auto", prompt]
+        return ["agy", f"--print={prompt}", "--dangerously-skip-permissions",
+                "--sandbox", *self._model_args()]
 
 
 class OpenCodeCodingTool(_CliCodingTool):
@@ -140,7 +164,7 @@ class OpenCodeCodingTool(_CliCodingTool):
     name = "opencode"
 
     def argv(self, prompt: str) -> list[str]:
-        return ["opencode", "run", "--auto", prompt]
+        return ["opencode", "run", "--auto", *self._model_args(), prompt]
 
 
 CODING_TOOLS: dict[str, type[_CliCodingTool]] = {
@@ -151,6 +175,7 @@ CODING_TOOLS: dict[str, type[_CliCodingTool]] = {
 }
 
 
-def build_coding_tool(name: str) -> CodingTool | None:
+def build_coding_tool(name: str,
+                      model: str | None = None) -> CodingTool | None:
     cls = CODING_TOOLS.get(name)
-    return cls() if cls else None
+    return cls(model=model) if cls else None
