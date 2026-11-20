@@ -520,7 +520,7 @@ def test_radar_refresh_serverless_runs_via_background_tasks(monkeypatch):
     """VERCEL 환경: refresh가 BackgroundTasks로 run을 끝까지 실행해 waiting_approval 도달."""
     monkeypatch.setenv("VERCEL", "1")
     from jobmate.adapters.fakes import FakeGitHub
-    from jobmate.models import RepoSummary
+    from jobmate.models import RadarClassification, RadarVerify
 
     db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
     settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
@@ -545,13 +545,15 @@ def test_radar_refresh_serverless_runs_via_background_tasks(monkeypatch):
     )
     llm = scripted_llm(
         {
-            "RepoSummary": RepoSummary(
-                summary_en="en",
-                summary_zh="zh",
-                summary_ko="ko",
-                taxonomy="agent-skill",
-                taxonomy_confidence=0.9,
-            )
+            "RadarClassification": [RadarClassification(label="skills", confidence=0.9)],
+            "": [
+                {
+                    "summary_en": ["e1", "e2", "e3"],
+                    "summary_zh": ["z1", "z2", "z3"],
+                    "summary_ko": ["한글1", "한글2", "한글3"],
+                }
+            ],
+            "RadarVerify": [RadarVerify(supported=True)],
         }
     )
     app = create_app(
@@ -568,6 +570,7 @@ def test_radar_refresh_serverless_runs_via_background_tasks(monkeypatch):
         "collect",
         "dedupe",
         "summarize",
+        "verify",
         "rank",
         "approve",
     ]

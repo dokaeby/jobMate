@@ -1,4 +1,5 @@
 """시크릿 패턴 스캔 — 결정적."""
+
 from __future__ import annotations
 
 import re
@@ -8,8 +9,10 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("openai_key", re.compile(r"sk-[A-Za-z0-9_-]{20,}")),
     ("gcp_key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
-    ("generic_secret", re.compile(
-        r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[^\s'\"]{8,}")),
+    (
+        "generic_secret",
+        re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[^\s'\"]{8,}"),
+    ),
 ]
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -12,6 +13,8 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from ..models import ModelConfig
+
+logger = logging.getLogger("jobmate.llm")
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -82,6 +85,13 @@ class OpenAICompatLLM:
                 with httpx.Client(timeout=model.timeout_seconds) as client:
                     resp = client.post(url, headers=headers, json=payload)
                 if resp.status_code in (429, 500, 502, 503, 504) and attempt < self._max_retries:
+                    logger.warning(
+                        "llm %s attempt %d/%d http %s — retrying",
+                        model.model,
+                        attempt + 1,
+                        self._max_retries + 1,
+                        resp.status_code,
+                    )
                     time.sleep(self._backoff * (2**attempt))
                     continue
                 resp.raise_for_status()
@@ -101,8 +111,21 @@ class OpenAICompatLLM:
             except (httpx.HTTPError, KeyError, IndexError, ValueError, ValidationError) as e:
                 last_err = e
                 if attempt < self._max_retries:
+                    logger.warning(
+                        "llm %s attempt %d/%d failed: %s — retrying",
+                        model.model,
+                        attempt + 1,
+                        self._max_retries + 1,
+                        str(e)[:200],
+                    )
                     time.sleep(self._backoff * (2**attempt))
                     continue
+                logger.error(
+                    "llm %s failed after %d attempts: %s",
+                    model.model,
+                    attempt + 1,
+                    str(e)[:200],
+                )
                 raise LLMError(f"llm call failed after {attempt + 1} attempts: {e}") from e
         raise LLMError(f"llm call failed: {last_err}")
 

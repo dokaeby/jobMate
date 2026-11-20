@@ -80,6 +80,27 @@ class RepoSummary(BaseModel):
     summary_status: str = "ok"  # ok|fallback|failed
 
 
+class RadarSummary3(BaseModel):
+    """skillRadar 포팅 — 언어별 정확히 3줄 요약 (LLM 경계 스키마)."""
+
+    summary_en: list[str] = Field(min_length=3, max_length=3)
+    summary_zh: list[str] = Field(min_length=3, max_length=3)
+    summary_ko: list[str] = Field(min_length=3, max_length=3)
+
+
+class RadarClassification(BaseModel):
+    """skillRadar 포팅 — taxonomy 분류 결과."""
+
+    label: str = "other"
+    confidence: float = 0.0
+
+
+class RadarVerify(BaseModel):
+    """skillRadar 포팅 — 요약 충실도 judge 결과."""
+
+    supported: bool = True
+
+
 class GenericOutput(BaseModel):
     """스키마 미지정 단계의 최소 출력."""
 

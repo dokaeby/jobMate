@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -20,6 +21,8 @@ from pydantic import BaseModel, ValidationError
 
 from ..models import ModelConfig
 from .client import LLMError, extract_json
+
+logger = logging.getLogger("jobmate.llm.codex")
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -68,6 +71,7 @@ class CodexAuth:
             timeout=30,
         )
         if resp.status_code != 200:
+            logger.warning("codex token refresh failed: status=%s", resp.status_code)
             raise LLMError(f"codex token refresh failed ({resp.status_code}); run `codex login`")
         new = resp.json()
         tokens["access_token"] = new["access_token"]
@@ -78,6 +82,7 @@ class CodexAuth:
         data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._path.write_text(json.dumps(data))
         self._path.chmod(0o600)
+        logger.info("codex access token refreshed")
 
     def headers(self) -> dict[str, str]:
         data = self._load()
@@ -152,8 +157,21 @@ class CodexResponsesLLM:
             except (httpx.HTTPError, KeyError, IndexError, ValueError, ValidationError) as e:
                 last_err = e
                 if attempt < self._max_retries:
+                    logger.warning(
+                        "codex llm %s attempt %d/%d failed: %s — retrying",
+                        model.model,
+                        attempt + 1,
+                        self._max_retries + 1,
+                        str(e)[:200],
+                    )
                     time.sleep(self._backoff * (2**attempt))
                     continue
+                logger.error(
+                    "codex llm %s failed after %d attempts: %s",
+                    model.model,
+                    attempt + 1,
+                    str(e)[:200],
+                )
                 raise LLMError(f"codex llm call failed after {attempt + 1} attempts: {e}") from e
         raise LLMError(f"codex llm call failed: {last_err}")
 
@@ -165,6 +183,11 @@ class CodexResponsesLLM:
         with httpx.Client(timeout=model.timeout_seconds) as client:
             with client.stream("POST", url, headers=self._auth.headers(), json=payload) as resp:
                 if resp.status_code in (429, 500, 502, 503, 504):
+                    logger.warning(
+                        "codex llm %s http %s — retryable",
+                        model.model,
+                        resp.status_code,
+                    )
                     raise httpx.HTTPStatusError(
                         f"retryable {resp.status_code}", request=resp.request, response=resp
                     )

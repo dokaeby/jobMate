@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Callable
 from typing import Any
+
+logger = logging.getLogger("jobmate.tools")
 
 
 class ToolDeniedError(Exception):
@@ -56,8 +59,10 @@ class ToolExecutor:
 
     def call(self, tool_name: str, allowed: list[str], **kwargs: Any) -> Any:
         if tool_name not in allowed:
+            logger.warning("tool denied (not in allowlist): %s", tool_name)
             raise ToolDeniedError(f"tool '{tool_name}' not in allowlist")
         fn = self._tools.get(tool_name)
         if fn is None:
+            logger.warning("tool denied (unknown): %s", tool_name)
             raise ToolDeniedError(f"unknown tool '{tool_name}'")
         return fn(**kwargs)

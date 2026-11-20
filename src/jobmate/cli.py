@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 
 from .config import (
@@ -17,6 +18,8 @@ from .models import RunStatus
 from .store.db import Store
 from .workflows import WORKFLOWS
 from .workflows.registry_builder import build_runner
+
+logger = logging.getLogger("jobmate.cli")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,22 +81,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "coding-worker":
-        import logging
         import signal
         import threading
 
         from .coding_worker import CodingJobWorker
 
-        log = logging.getLogger("jobmate.cli")
         worker = CodingJobWorker(store, settings, llm)
         worker.start()
-        log.info("coding-worker started owner=%s", worker.owner)
+        logger.info("coding-worker started owner=%s", worker.owner)
         stop = threading.Event()
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: stop.set())
         stop.wait()
         worker.stop()
-        log.info("coding-worker stopped")
+        logger.info("coding-worker stopped")
         return 0
 
     if args.cmd == "google-auth":
@@ -111,8 +112,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.kind, client_id=cid, client_secret=csec, token_path=args.token_path
             )
         except (GoogleAuthError, OSError, KeyError, ValueError) as e:
+            logger.warning("google-auth %s failed: %s", args.kind, e)
             print(f"google-auth failed: {e}", file=sys.stderr)
             return 1
+        logger.info("google-auth %s token saved: %s", args.kind, path)
         print(f"token saved: {path}")
         return 0
 
@@ -126,10 +129,12 @@ def main(argv: list[str] | None = None) -> int:
             args.workflow, WORKFLOWS[args.workflow].version, {"task": args.task}, trace_id="cli"
         )
         runner = build_runner(args.workflow, store=store, llm=llm, settings=settings)
+        logger.info("cli run %s workflow=%s", run.id, args.workflow)
         try:
             runner.invoke(run.id, {"task": args.task})
         except Exception as e:
             store.update_run(run.id, status=RunStatus.FAILED, error=str(e)[:300])
+            logger.error("cli run %s failed: %s", run.id, str(e)[:300])
         r = store.get_run(run.id)
         print(
             json.dumps(

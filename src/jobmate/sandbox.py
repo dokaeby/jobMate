@@ -9,9 +9,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from collections.abc import Callable
+
+logger = logging.getLogger("jobmate.sandbox")
 
 MODES = ("none", "seatbelt", "docker")
 _ENV_PASSTHROUGH = ("_API_KEY", "_TOKEN", "_SECRET")
@@ -48,6 +51,9 @@ def make_wrapper(
 
     if mode == "seatbelt":
         if shutil.which("sandbox-exec") is None:
+            logger.warning(
+                "coding sandbox=seatbelt requested but sandbox-exec missing — unsandboxed"
+            )
             return None
         profile = seatbelt_profile(ws)
 
@@ -58,6 +64,7 @@ def make_wrapper(
 
     if mode == "docker":
         if shutil.which("docker") is None:
+            logger.warning("coding sandbox=docker requested but docker missing — unsandboxed")
             return None
 
         def wrap_docker(argv: list[str]) -> list[str]:
@@ -77,4 +84,5 @@ def make_wrapper(
 
         return wrap_docker
 
+    logger.warning("unknown coding sandbox mode=%s — unsandboxed", mode)
     return None

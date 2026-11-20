@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings
 from .tools import WorkspaceTools
+
+logger = logging.getLogger("jobmate.agent")
 
 MAX_STEPS = 40
 RESULT_PREVIEW = 500
@@ -87,6 +90,12 @@ class CodingAgent:
         steps: list[dict[str, Any]] = []
         usage = {"tokens_in": 0, "tokens_out": 0}
         status, answer, error = "done", "", ""
+        logger.info(
+            "coding agent start workspace=%s model=%s max_steps=%d",
+            workspace,
+            cfg.model,
+            max_steps,
+        )
 
         for i in range(max_steps):
             if cancel_check is not None and cancel_check():
@@ -101,6 +110,7 @@ class CodingAgent:
                 out, u = self._llm.complete(model=cfg, system=SYSTEM, user=user, schema=AgentAction)
             except Exception as e:
                 status, error = "failed", f"llm error: {str(e)[:300]}"
+                logger.warning("coding agent llm error step=%d: %s", i + 1, str(e)[:200])
                 break
             usage["tokens_in"] += int(u.get("tokens_in", 0))
             usage["tokens_out"] += int(u.get("tokens_out", 0))
@@ -109,6 +119,7 @@ class CodingAgent:
                 answer = act.answer
                 break
             result = tools.call(act.tool, act.args or {})
+            logger.debug("coding agent step %d tool=%s", i + 1, act.tool)
             steps.append(
                 {
                     "step": i + 1,
@@ -122,6 +133,16 @@ class CodingAgent:
                 on_step(list(steps))
         else:
             status, error = "max_steps", f"reached max_steps={max_steps}"
+
+        if status in ("failed", "timeout", "max_steps"):
+            logger.warning(
+                "coding agent ended status=%s steps=%d error=%s",
+                status,
+                len(steps),
+                error[:200],
+            )
+        else:
+            logger.info("coding agent ended status=%s steps=%d", status, len(steps))
 
         return {
             "status": status,

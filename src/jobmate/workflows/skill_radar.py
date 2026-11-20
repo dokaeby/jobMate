@@ -9,7 +9,7 @@ from ..models import StageSpec, WorkflowSpec
 
 SPEC = WorkflowSpec(
     key="skill_radar",
-    version="0.1.0",
+    version="0.2.0",
     entry="collect",
     stages=[
         StageSpec(
@@ -28,7 +28,13 @@ SPEC = WorkflowSpec(
             key="summarize",
             kind="function",
             function="radar_summarize",
-            description="3개 언어 요약 + 분류 (content_hash 캐시)",
+            description="sanitize+분류+3개 언어 요약 (content_hash 캐시)",
+        ),
+        StageSpec(
+            key="verify",
+            kind="function",
+            function="radar_verify",
+            description="요약 충실도 judge 검증 (실패 시 재요약)",
         ),
         StageSpec(
             key="rank",

@@ -105,6 +105,99 @@
   .digest pre { white-space: pre-wrap; font-family: inherit;
                 font-size: 14px; margin: 0; color: var(--ink-2); }
   .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  /* ── Skill Radar ── */
+  .radar-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .radar-tabs { display: inline-flex; gap: 2px; background: var(--surface-hover);
+                border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+  .radar-tabs button { border: none; background: transparent; color: var(--muted);
+                       padding: 5px 12px; border-radius: 7px; font-weight: 600; font-size: 13px; }
+  .radar-tabs button.on { background: var(--surface); color: var(--ink);
+                          box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .radar-topics { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px;
+                  scrollbar-width: thin; }
+  .radar-chip { flex-shrink: 0; border: 1px solid var(--border); background: var(--surface);
+                color: var(--ink-2); border-radius: 999px; padding: 4px 12px;
+                font-size: 12px; font-weight: 600; cursor: pointer; }
+  .radar-chip:hover { border-color: var(--accent-border); color: var(--accent); }
+  .radar-chip.on { background: var(--accent-soft); border-color: var(--accent-border);
+                   color: var(--accent); }
+  .radar-chip .cnt { color: var(--muted); font-weight: 500; margin-left: 4px; }
+  #radar-topic-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                      margin-bottom: 12px; }
+  #radar-topic-head button { padding: 5px 12px; font-size: 13px; }
+  .radar-topic-title { font-weight: 800; font-size: 16px; }
+  .radar-related { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; margin-top: 6px; }
+  .radar-related .radar-chip { font-size: 11px; padding: 3px 10px; }
+  #radar-filters { display: flex; gap: 14px; align-items: center; margin-bottom: 14px;
+                   flex-wrap: wrap; }
+  #radar-filters select { width: auto; }
+  .radar-minstars { display: flex; align-items: center; gap: 8px; font-size: 13px;
+                    color: var(--ink-2); font-weight: 600; }
+  .radar-minstars input[type=range] { width: 140px; accent-color: var(--accent); }
+  .radar-grid { display: grid; gap: 14px;
+                grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .radar-card { display: flex; flex-direction: column; gap: 10px; }
+  .radar-card-head { display: flex; gap: 10px; align-items: flex-start; }
+  .radar-rank { flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
+                background: var(--surface-hover); border: 1px solid var(--border);
+                display: flex; align-items: center; justify-content: center;
+                font-weight: 800; font-size: 13px; color: var(--ink-2); }
+  .radar-name { font-weight: 700; font-size: 15px; color: var(--ink);
+                text-decoration: none; word-break: break-all; }
+  .radar-name:hover { color: var(--accent); }
+  .radar-desc { font-size: 12px; color: var(--muted); margin: 2px 0 0;
+                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: clamp: 2; overflow: hidden; }
+  .radar-badges { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+  .radar-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
+                 border: 1px solid var(--border); background: var(--surface-hover);
+                 color: var(--ink-2); text-transform: uppercase; letter-spacing: .03em; }
+  .radar-badge.tax { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+  .radar-badge.lic { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .radar-badge.plat-claude { color: #b4552d; }
+  .radar-badge.plat-chatgpt { color: #0b7a5c; }
+  .radar-badge.plat-gemini { color: #2b63d9; }
+  .radar-badge.up { color: var(--ok); border-color: var(--ok-border); background: var(--ok-soft); }
+  .radar-summary { list-style: none; margin: 0; padding: 0; font-size: 13px;
+                   color: var(--ink-2); display: grid; gap: 6px; }
+  .radar-summary li { display: flex; gap: 8px; }
+  .radar-summary li::before { content: ""; flex-shrink: 0; width: 5px; height: 5px;
+                              border-radius: 50%; background: var(--muted);
+                              margin-top: 8px; }
+  .radar-topics-row { display: flex; gap: 5px; flex-wrap: wrap; }
+  .radar-topic-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px;
+                     background: var(--surface-hover); border: 1px solid var(--border);
+                     color: var(--muted); cursor: pointer; }
+  .radar-topic-tag:hover { color: var(--accent); border-color: var(--accent-border); }
+  .radar-card-foot { display: flex; justify-content: space-between; align-items: center;
+                     border-top: 1px solid var(--border); padding-top: 10px; margin-top: auto; }
+  .radar-stars { font-size: 12px; color: var(--ink-2); font-weight: 700; }
+  .radar-gh { font-size: 12px; font-weight: 600; color: var(--accent);
+              text-decoration: none; padding: 5px 10px; border-radius: 8px;
+              border: 1px solid var(--border); }
+  .radar-gh:hover { background: var(--accent-soft); }
+  #radar-detail .card { padding: 20px; }
+  .radar-detail-head { display: flex; justify-content: space-between; gap: 12px;
+                       align-items: flex-start; flex-wrap: wrap; }
+  .radar-detail-sum { margin-top: 16px; }
+  .radar-detail-sum h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+                         color: var(--muted); margin: 0 0 10px; }
+  .radar-lang-tabs { display: inline-flex; gap: 4px; margin-bottom: 10px; }
+  .radar-lang-tabs button { border: 1px solid var(--border); background: var(--surface);
+                            color: var(--muted); padding: 4px 12px; border-radius: 8px;
+                            font-size: 12px; font-weight: 700; cursor: pointer; }
+  .radar-lang-tabs button.on { background: var(--accent-soft); color: var(--accent);
+                               border-color: var(--accent-border); }
+  .radar-readme { margin-top: 14px; }
+  .radar-readme summary { font-size: 12px; font-weight: 700; color: var(--muted);
+                          cursor: pointer; text-transform: uppercase; letter-spacing: .06em; }
+  .radar-readme pre { margin-top: 8px; font-size: 12px; white-space: pre-wrap;
+                      background: var(--surface-hover); border: 1px solid var(--border);
+                      border-radius: 10px; padding: 12px; max-height: 320px; overflow: auto;
+                      color: var(--ink-2); }
+  .radar-detail-back { background: none; border: none; color: var(--muted);
+                       font-size: 13px; font-weight: 600; cursor: pointer; padding: 0;
+                       margin-bottom: 10px; }
+  .radar-detail-back:hover { color: var(--accent); }
   .mono { font-family: ui-monospace, monospace; font-size: 13px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 10px 12px;
@@ -225,17 +318,55 @@
     <section id="view-radar" hidden>
       <div class="page-head">
         <h1 class="page-title">Skill Radar</h1>
-        <p class="page-desc">플랫폼별 trending 레포지토리</p>
-        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <p class="page-desc">GitHub AI 도구 트렌딩 — 플랫폼별 일일 Top10 큐레이션</p>
+        <div class="radar-controls">
+          <div class="radar-tabs" id="radar-period">
+            <button data-p="daily" class="on">일간</button>
+            <button data-p="week">주간</button>
+            <button data-p="month">월간</button>
+          </div>
           <select id="radar-platform">
             <option value="claude">claude</option>
             <option value="chatgpt">chatgpt</option>
             <option value="gemini">gemini</option>
           </select>
+          <select id="radar-lang">
+            <option value="ko">한국어</option>
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+          </select>
+          <select id="radar-date" hidden></select>
           <button class="secondary" id="radar-refresh">새로고침</button>
         </div>
       </div>
-      <div id="radar-body" class="empty">데이터 없음</div>
+
+      <div id="radar-topics" class="radar-topics"></div>
+
+      <div id="radar-topic-head" hidden>
+        <button class="secondary" id="radar-topic-back">← 트렌딩으로</button>
+        <span id="radar-topic-title" class="radar-topic-title"></span>
+        <span id="radar-topic-count" class="card-meta"></span>
+        <div class="radar-tabs" id="radar-topic-platforms">
+          <button data-tp="all" class="on">전체</button>
+          <button data-tp="claude">claude</button>
+          <button data-tp="chatgpt">chatgpt</button>
+          <button data-tp="gemini">gemini</button>
+        </div>
+        <div id="radar-related" class="radar-related"></div>
+      </div>
+
+      <div id="radar-filters">
+        <select id="radar-tax">
+          <option value="all">분류: 전체</option>
+        </select>
+        <label class="radar-minstars">최소 스타 <span id="radar-minstars-label">0</span>
+          <input type="range" id="radar-minstars" min="0" max="5000" step="100" value="0">
+        </label>
+      </div>
+
+      <div id="radar-grid" class="radar-grid"></div>
+      <div id="radar-empty" class="empty" hidden>데이터 없음</div>
+      <div id="radar-detail" hidden></div>
     </section>
 
     <!-- Runs -->
@@ -703,35 +834,351 @@ async function reviewEvent(id, action, card) {
   } catch (e) { msg.textContent = e.message; }
 }
 
-/* ── Skill Radar ── */
-async function loadRadar() { refreshRadar(); }
-async function refreshRadar() {
-  const p = $("#radar-platform").value;
-  try {
-    const d = await api(`/radar/trending?platform=${p}&lang=ko`);
-    const el = $("#radar-body");
-    if (!d.items || !d.items.length) { el.innerHTML = '<div class="empty">데이터 없음</div>'; return; }
-    el.innerHTML = `<div class="card-meta" style="margin-bottom:10px">${esc(d.date)}</div>` +
-      d.items.slice(0, 10).map(i => `
-      <details class="card" style="padding:14px 18px"><summary>
-        <strong>#${i.rank} ${esc(i.repo)}</strong>
-        <span class="badge">★${i.stars}${i.stars_today ? ` (+${i.stars_today})` : ""}</span>
-      </summary>
-      <p style="margin:10px 0">${esc(i.summary || i.description || "")}</p>
-      <p class="card-meta mono"><a href="${esc(i.url)}" style="color:var(--accent)">${esc(i.url)}</a>
-        ${i.language ? ` · ${esc(i.language)}` : ""}${i.license ? ` · ${esc(i.license)}` : ""}
-        ${i.taxonomy ? ` · ${esc(i.taxonomy)}` : ""}</p></details>`).join("");
-  } catch (e) { $("#radar-body").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+/* ── Skill Radar (skillRadar app.js 포팅) ── */
+const radar = {
+  platform: "claude", lang: "ko", period: "daily", date: "",
+  topic: null, topicPlatform: "all", taxFilter: "all", minStars: 0,
+  allTopics: [], lastItems: [],
+};
+const TAX_LABELS = {
+  agents: "에이전트", mcp: "MCP", skills: "스킬", plugins: "플러그인",
+  devtools: "개발도구", automation: "자동화", data: "데이터", other: "기타",
+};
+
+function radarEsc(s) { return esc(s ?? ""); }
+function radarStars(n) {
+  n = n || 0;
+  return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
 }
+function radarLicShort(l) {
+  const m = { "Apache-2.0": "Apache-2.0", "MIT": "MIT", "BSD-2-Clause": "BSD-2",
+    "BSD-3-Clause": "BSD-3", "GPL-3.0": "GPL-3", "GPL-2.0": "GPL-2",
+    "AGPL-3.0": "AGPL-3", "LGPL-3.0": "LGPL-3", "MPL-2.0": "MPL-2.0",
+    "ISC": "ISC", "Unlicense": "Unlicense", "0BSD": "0BSD", "CC0-1.0": "CC0" };
+  return m[l] || (l.length > 12 ? l.slice(0, 12) : l);
+}
+function radarPassFilters(i) {
+  if (radar.taxFilter !== "all" && i.taxonomy !== radar.taxFilter) return false;
+  if ((i.stars || 0) < radar.minStars) return false;
+  return true;
+}
+function radarSkeletons() {
+  $("#radar-grid").innerHTML = Array.from({ length: 6 }, () =>
+    `<div class="card radar-card" style="padding:16px"><div class="card-meta">로딩…</div></div>`).join("");
+  $("#radar-empty").hidden = true;
+}
+function radarShowList() {
+  $("#radar-grid").hidden = false;
+  $("#radar-empty").hidden = false;
+  $("#radar-detail").hidden = true;
+}
+
+function radarCard(i) {
+  const topics = (i.topics || []).slice(0, 4)
+    .map(t => `<span class="radar-topic-tag" data-t="${radarEsc(t)}">#${radarEsc(t)}</span>`).join("");
+  const delta = i.stars_today;
+  const deltaHtml = delta == null ? '<span class="card-meta">—</span>'
+    : delta > 0 ? `<span class="radar-badge up">+${radarStars(delta)}</span>`
+    : '<span class="card-meta">±0</span>';
+  const summary = (i.summary || []).map(l => `<li>${radarEsc(l)}</li>`).join("");
+  const badges = [
+    i.platform ? `<span class="radar-badge plat-${radarEsc(i.platform)}">${radarEsc(i.platform)}</span>` : "",
+    i.taxonomy ? `<span class="radar-badge tax">${radarEsc(TAX_LABELS[i.taxonomy] || i.taxonomy)}</span>` : "",
+    i.appearances > 1 ? `<span class="radar-badge">${i.appearances}회</span>` : "",
+    i.license ? `<span class="radar-badge lic">${radarEsc(radarLicShort(i.license))}</span>` : "",
+    i.language ? `<span class="radar-badge">${radarEsc(i.language)}</span>` : "",
+  ].join("");
+  return `<article class="card radar-card">
+    <div class="radar-card-head">
+      <span class="radar-rank">${i.rank || ""}</span>
+      <div style="min-width:0;flex:1">
+        <a class="radar-name" href="#" data-repo="${radarEsc(i.repo)}">${radarEsc(i.repo)}</a>
+        ${i.description ? `<p class="radar-desc">${radarEsc(i.description)}</p>` : ""}
+        <div class="radar-badges">${badges}</div>
+      </div>
+    </div>
+    ${summary ? `<ul class="radar-summary">${summary}</ul>` : ""}
+    <div class="radar-card-foot">
+      <div class="radar-topics-row">${topics}</div>
+      <span class="radar-stars">★${radarStars(i.stars)} ${deltaHtml}</span>
+    </div>
+    <div><a class="radar-gh" href="${radarEsc(i.url)}" target="_blank" rel="noopener">GitHub ↗</a></div>
+  </article>`;
+}
+
+function radarRender() {
+  const items = radar.lastItems.filter(radarPassFilters);
+  const grid = $("#radar-grid"), empty = $("#radar-empty");
+  if (!items.length) {
+    grid.innerHTML = "";
+    empty.textContent = radar.topic ? "이 주제의 저장소가 없습니다" : "데이터 없음";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  grid.innerHTML = items.map(radarCard).join("");
+  grid.querySelectorAll("[data-repo]").forEach(a =>
+    a.addEventListener("click", e => { e.preventDefault(); radarShowDetail(a.dataset.repo); }));
+  grid.querySelectorAll(".radar-topic-tag").forEach(t =>
+    t.addEventListener("click", () => radarSelectTopic(t.dataset.t, 0)));
+}
+
+async function radarLoadTopics() {
+  try {
+    const d = await api("/radar/topics");
+    radar.allTopics = d.topics || [];
+    $("#radar-topics").innerHTML = radar.allTopics.slice(0, 30).map(t =>
+      `<button class="radar-chip${radar.topic === t.topic ? " on" : ""}" data-topic="${radarEsc(t.topic)}">#${radarEsc(t.topic)}<span class="cnt">${t.count}</span></button>`).join("");
+    $("#radar-topics").querySelectorAll(".radar-chip").forEach(b =>
+      b.addEventListener("click", () => {
+        const t = radar.allTopics.find(x => x.topic === b.dataset.topic);
+        radarSelectTopic(b.dataset.topic, t ? t.count : 0);
+      }));
+  } catch (e) { /* 토픽 실패는 무시 */ }
+}
+
+async function radarLoadDates() {
+  try {
+    const d = await api(`/radar/dates?platform=${radar.platform}`);
+    const sel = $("#radar-date");
+    sel.innerHTML = (d.dates || []).map(x => `<option value="${x}">${x}</option>`).join("");
+    if (d.dates && d.dates.length) { radar.date = d.dates[0]; sel.value = radar.date; }
+  } catch (e) { /* 무시 */ }
+}
+
+async function radarLoadTrending() {
+  radarSkeletons();
+  try {
+    const params = new URLSearchParams({ platform: radar.platform, lang: radar.lang });
+    if (radar.date) params.set("date", radar.date);
+    const d = await api(`/radar/trending?${params}`);
+    radar.lastItems = d.items || [];
+    radarRender();
+  } catch (e) {
+    $("#radar-grid").innerHTML = "";
+    $("#radar-empty").textContent = e.message;
+    $("#radar-empty").hidden = false;
+  }
+}
+
+async function radarLoadRanking() {
+  radarSkeletons();
+  try {
+    const params = new URLSearchParams({
+      period: radar.period === "week" ? "week" : "month",
+      platform: radar.platform, lang: radar.lang });
+    const d = await api(`/radar/ranking?${params}`);
+    radar.lastItems = d.items || [];
+    radarRender();
+  } catch (e) {
+    $("#radar-grid").innerHTML = "";
+    $("#radar-empty").textContent = e.message;
+    $("#radar-empty").hidden = false;
+  }
+}
+
+function radarSelectTopic(topic, count) {
+  radar.topic = topic;
+  radar.topicPlatform = "all";
+  $("#radar-topic-head").hidden = false;
+  $("#radar-topic-title").textContent = `#${topic}`;
+  $("#radar-topic-count").textContent = count ? `최근 30일 ${count}개 저장소` : "";
+  $("#radar-topics").querySelectorAll(".radar-chip").forEach(b =>
+    b.classList.toggle("on", b.dataset.topic === topic));
+  radarSyncTopicPlatformTabs();
+  radarLoadTopicRepos();
+  radarLoadRelated(topic);
+}
+
+function radarClearTopic() {
+  radar.topic = null;
+  $("#radar-topic-head").hidden = true;
+  $("#radar-topics").querySelectorAll(".radar-chip").forEach(b => b.classList.remove("on"));
+  radarLoadTrending();
+}
+
+function radarSyncTopicPlatformTabs() {
+  $("#radar-topic-platforms").querySelectorAll("button").forEach(b =>
+    b.classList.toggle("on", b.dataset.tp === radar.topicPlatform));
+}
+
+async function radarLoadTopicRepos() {
+  if (!radar.topic) return;
+  radarSkeletons();
+  try {
+    const params = new URLSearchParams({
+      topic: radar.topic, platform: radar.topicPlatform,
+      lang: radar.lang, limit: "30" });
+    const d = await api(`/radar/topic-repos?${params}`);
+    radar.lastItems = d.items || [];
+    radarRender();
+  } catch (e) {
+    $("#radar-grid").innerHTML = "";
+    $("#radar-empty").textContent = e.message;
+    $("#radar-empty").hidden = false;
+  }
+}
+
+async function radarLoadRelated(topic) {
+  const el = $("#radar-related");
+  el.innerHTML = "";
+  try {
+    const d = await api(`/radar/related-topics?topic=${encodeURIComponent(topic)}`);
+    const rel = (d.related || []).filter(r => r.topic !== topic).slice(0, 8);
+    if (!rel.length) return;
+    rel.forEach(r => {
+      const b = document.createElement("button");
+      b.className = "radar-chip";
+      b.textContent = `#${r.topic}`;
+      b.addEventListener("click", () => {
+        const t = radar.allTopics.find(x => x.topic === r.topic);
+        radarSelectTopic(r.topic, t ? t.count : 0);
+      });
+      el.appendChild(b);
+    });
+  } catch (e) { /* 무시 */ }
+}
+
+async function radarShowDetail(repo) {
+  const el = $("#radar-detail");
+  $("#radar-grid").hidden = true;
+  $("#radar-empty").hidden = true;
+  $("#radar-topics").hidden = true;
+  $("#radar-topic-head").hidden = true;
+  $("#radar-filters").hidden = true;
+  el.hidden = false;
+  el.innerHTML = `<div class="card" style="padding:20px"><div class="card-meta">로딩…</div></div>`;
+  try {
+    const d = await api(`/radar/repo/${encodeURIComponent(repo)}?lang=${radar.lang}`);
+    const it = d.item;
+    const sums = it.summaries || {};
+    const langs = Object.keys(sums);
+    const langTabs = langs.map(lg =>
+      `<button data-lg="${lg}" class="${lg === radar.lang ? "on" : ""}">${lg === "ko" ? "한국어" : lg === "en" ? "English" : "中文"}</button>`).join("");
+    const panes = langs.map(lg =>
+      `<div class="radar-sum-pane" data-pane="${lg}" ${lg === radar.lang ? "" : "hidden"}><ul class="radar-summary">${(sums[lg] || []).map(l => `<li>${radarEsc(l)}</li>`).join("")}</ul></div>`).join("");
+    const badges = [
+      it.snapshot_platform ? `<span class="radar-badge plat-${radarEsc(it.snapshot_platform)}">${radarEsc(it.snapshot_platform)}</span>` : "",
+      it.taxonomy ? `<span class="radar-badge tax">${radarEsc(TAX_LABELS[it.taxonomy] || it.taxonomy)}</span>` : "",
+      it.language ? `<span class="radar-badge">${radarEsc(it.language)}</span>` : "",
+      it.license ? `<span class="radar-badge lic">${radarEsc(radarLicShort(it.license))}</span>` : "",
+      `<span class="radar-badge">★${radarStars(it.stars)}</span>`,
+      it.collected_date ? `<span class="radar-badge">수집 ${radarEsc(it.collected_date)}</span>` : "",
+    ].join("");
+    const readme = it.readme_excerpt
+      ? `<details class="radar-readme"><summary>README</summary><pre>${radarEsc(it.readme_excerpt)}</pre></details>` : "";
+    const related = (it.related_topics || []).length
+      ? `<div style="margin-top:14px"><h4 style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px">관련 주제</h4><div class="radar-topics-row">${it.related_topics.map(t => `<span class="radar-topic-tag" data-t="${radarEsc(t)}">#${radarEsc(t)}</span>`).join("")}</div></div>` : "";
+    el.innerHTML = `<div class="card" style="padding:20px">
+      <button class="radar-detail-back">← 목록으로</button>
+      <div class="radar-detail-head">
+        <div style="min-width:0">
+          <a class="radar-name" style="font-size:18px" href="${radarEsc(it.url)}" target="_blank" rel="noopener">${radarEsc(it.repo || repo)}</a>
+          ${it.description ? `<p class="radar-desc" style="-webkit-line-clamp:3">${radarEsc(it.description)}</p>` : ""}
+          <div class="radar-badges">${badges}</div>
+        </div>
+        <a class="radar-gh" href="${radarEsc(it.url)}" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="radar-detail-sum">
+        <h4>요약</h4>
+        <div class="radar-lang-tabs">${langTabs}</div>
+        ${panes}
+      </div>
+      ${readme}${related}
+    </div>`;
+    el.querySelector(".radar-detail-back").addEventListener("click", radarBackToList);
+    el.querySelectorAll(".radar-lang-tabs button").forEach(b =>
+      b.addEventListener("click", () => {
+        const lg = b.dataset.lg;
+        el.querySelectorAll(".radar-sum-pane").forEach(p => p.hidden = p.dataset.pane !== lg);
+        el.querySelectorAll(".radar-lang-tabs button").forEach(x => x.classList.toggle("on", x === b));
+      }));
+    el.querySelectorAll(".radar-topic-tag").forEach(t =>
+      t.addEventListener("click", () => {
+        const tp = t.dataset.t;
+        const cnt = (radar.allTopics.find(x => x.topic === tp) || {}).count || 0;
+        radarBackToList();
+        radarSelectTopic(tp, cnt);
+      }));
+  } catch (e) {
+    el.innerHTML = `<div class="card" style="padding:20px"><p style="color:var(--err)">수집된 저장소가 아닙니다</p><button class="radar-detail-back">← 목록으로</button></div>`;
+    el.querySelector(".radar-detail-back").addEventListener("click", radarBackToList);
+  }
+}
+
+function radarBackToList() {
+  $("#radar-detail").hidden = true;
+  $("#radar-grid").hidden = false;
+  $("#radar-empty").hidden = false;
+  $("#radar-topics").hidden = false;
+  $("#radar-topic-head").hidden = radar.topic == null;
+  $("#radar-filters").hidden = false;
+  if (radar.topic) radarLoadTopicRepos(); else radarLoadTrending();
+}
+
+function radarSyncTaxFilter() {
+  const sel = $("#radar-tax");
+  const labels = Object.keys(TAX_LABELS);
+  sel.innerHTML = `<option value="all">분류: 전체</option>` +
+    labels.map(t => `<option value="${t}">${TAX_LABELS[t]}</option>`).join("");
+  sel.value = radar.taxFilter;
+}
+
+async function loadRadar() {
+  radarSyncTaxFilter();
+  await radarLoadTopics();
+  await radarLoadDates();
+  if (radar.period === "daily") radarLoadTrending(); else radarLoadRanking();
+}
+function refreshRadar() {
+  if (radar.topic) radarLoadTopicRepos();
+  else if (radar.period === "daily") radarLoadTrending();
+  else radarLoadRanking();
+}
+
+$("#radar-period").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  radar.period = b.dataset.p;
+  $("#radar-period").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  $("#radar-date").hidden = radar.period !== "daily";
+  $("#radar-topic-head").hidden = true; radar.topic = null;
+  if (radar.period === "daily") radarLoadDates().then(radarLoadTrending);
+  else radarLoadRanking();
+});
+$("#radar-platform").addEventListener("change", e => {
+  radar.platform = e.target.value;
+  if (radar.period === "daily") radarLoadDates().then(radarLoadTrending);
+  else radarLoadRanking();
+});
+$("#radar-lang").addEventListener("change", e => {
+  radar.lang = e.target.value; refreshRadar();
+});
+$("#radar-date").addEventListener("change", e => {
+  radar.date = e.target.value; radarLoadTrending();
+});
+$("#radar-tax").addEventListener("change", e => {
+  radar.taxFilter = e.target.value; radarRender();
+});
+$("#radar-minstars").addEventListener("input", e => {
+  radar.minStars = Number(e.target.value);
+  $("#radar-minstars-label").textContent = radarStars(radar.minStars);
+  radarRender();
+});
+$("#radar-topic-back").addEventListener("click", radarClearTopic);
+$("#radar-topic-platforms").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  radar.topicPlatform = b.dataset.tp;
+  radarSyncTopicPlatformTabs();
+  radarLoadTopicRepos();
+});
 $("#radar-refresh").addEventListener("click", async () => {
   try {
     const r = await api("/radar/refresh", {method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({platforms: [$("#radar-platform").value], force: true})});
+      body: JSON.stringify({platforms: [radar.platform], force: true})});
     $("#form-status").textContent = `레이더 수집 시작: ${r.run_ids.join(",")}`;
   } catch (e) { alert(e.message); }
 });
-$("#radar-platform").addEventListener("change", refreshRadar);
 
 /* ── Runs ── */
 async function loadRuns() { refreshRuns(); }

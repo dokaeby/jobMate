@@ -15,6 +15,7 @@ dependencies = [
     "google-adk>=2.14.1",
     "psycopg[binary]>=3.3.9",
     "langsmith>=0.15",
+    "deep-translator>=1.11,<2",
 ]
 
 [project.scripts]

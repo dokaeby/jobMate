@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from typing import Any, Literal, cast
@@ -25,6 +26,8 @@ from ..store.db import Store
 from .functions import FUNCTIONS, FunctionContext
 from .schemas import SCHEMAS
 from .state import HarnessState, initial_state
+
+logger = logging.getLogger("jobmate.engine")
 
 ESCALATE_NEEDS_HUMAN = "needs_human"
 ESCALATE_BUDGET = "budget_exhausted"
@@ -217,6 +220,14 @@ class WorkflowRunner:
             self.store.audit(
                 run_id, f"agent:{agent.role}", "stage_error", stage.key, {"error": str(e)[:200]}
             )
+            logger.warning(
+                "run %s stage %s agent=%s error attempt=%d: %s",
+                run_id,
+                stage.key,
+                agent.role,
+                attempt,
+                str(e)[:200],
+            )
             if attempt >= agent.max_attempts:
                 return {"escalate": ESCALATE_FAILED}
             # 스키마/파싱 실패 — 재시도는 다음 attempt로 진행하기 위해
@@ -254,6 +265,14 @@ class WorkflowRunner:
         except Exception as e:
             self.store.finish_stage(stage_run.id, status=StageStatus.FAILED, error=str(e)[:500])
             self.store.audit(run_id, "tool", "function_error", stage.key, {"error": str(e)[:200]})
+            logger.warning(
+                "run %s stage %s function=%s error attempt=%d: %s",
+                run_id,
+                stage.key,
+                stage.function,
+                attempt,
+                str(e)[:200],
+            )
             return {"escalate": ESCALATE_FAILED}
 
     def _run_human_stage(self, state: HarnessState, stage: StageSpec) -> dict[str, Any]:
@@ -277,6 +296,7 @@ class WorkflowRunner:
         raw_dec = (decision or {}).get("decision", "reject")
         dec: Literal["approve", "reject"] = "approve" if raw_dec == "approve" else "reject"
         comment = (decision or {}).get("comment", "")
+        logger.info("run %s approval stage=%s decision=%s", run_id, stage.key, dec)
         out = {"decision": dec, "comment": comment}
         self.store.finish_stage(stage_run_id, status=StageStatus.SUCCEEDED, output=out)
         self.store.add_approval(run_id, stage.key, dec, comment)
@@ -371,6 +391,7 @@ class WorkflowRunner:
         self.store.audit(
             run_id, "system", "run_finalized", "", {"status": status.value, "escalate": escalate}
         )
+        logger.info("run %s finalized status=%s escalate=%s", run_id, status.value, escalate or "-")
         run = self.store.get_run(run_id)
         if run is not None and self.spec.key == "dev_review":
             meta = dict(run.metadata or {})
@@ -457,6 +478,7 @@ class WorkflowRunner:
     ) -> HarnessState:
         state = initial_state(run_id, self.spec.key, gmail_ctx)
         self.store.update_run(run_id, status=RunStatus.RUNNING)
+        logger.info("run %s invoke workflow=%s", run_id, self.spec.key)
         config = {"configurable": {"thread_id": run_id}}
         return self._graph.invoke(state, config)
 

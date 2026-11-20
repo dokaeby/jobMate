@@ -145,8 +145,10 @@ class CodingJobWorker:
                 if not self._store.renew_coding_lease(job_id, self._owner, self._lease_seconds):
                     with self._lease_lock:
                         self._lease_lost.add(job_id)
+                    logger.warning("coding job %s lease lost (owner=%s)", job_id, self._owner)
                     return  # lease 상실 — 다른 워커가 회수했거나 job 종료
-            except Exception:
+            except Exception as e:
+                logger.warning("coding job %s lease renew error: %s", job_id, str(e)[:120])
                 return
 
     def _lost(self, job_id: str) -> bool:
@@ -205,6 +207,7 @@ class CodingJobWorker:
     def _run_job(self, job_id: str) -> None:
         job = self._store.get_coding_job(job_id)
         if job is None or job.get("status") != "running":
+            logger.debug("coding job %s skipped (status=%s)", job_id, (job or {}).get("status"))
             return
         logger.info(
             "coding job %s start engine=%s tool=%s attempt=%s",

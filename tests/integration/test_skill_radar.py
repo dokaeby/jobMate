@@ -1,7 +1,7 @@
-"""skillRadar 포팅 기능 테스트 — collect/dedupe/summarize/rank/publish."""
+"""skillRadar 포팅 기능 테스트 — collect/dedupe/sanitize/classify/summarize/verify/rank/publish."""
 
 from jobmate.adapters.fakes import FakeGitHub, FakeNotifier
-from jobmate.models import RepoSummary
+from jobmate.models import RadarClassification, RadarVerify
 from jobmate.workflows.registry_builder import build_runner
 
 from .helpers import make_env, scripted_llm
@@ -23,18 +23,22 @@ def _repo(name, stars=100, **kw):
     return r
 
 
-def _summaries(n=5):
+def _summary_dict(i=0):
     return {
-        "RepoSummary": [
-            RepoSummary(
-                summary_en=f"en {i}",
-                summary_zh=f"zh {i}",
-                summary_ko=f"ko {i}",
-                taxonomy="agent-skill",
-                taxonomy_confidence=0.9,
-            )
-            for i in range(n)
-        ]
+        "summary_en": [f"en {i} a", f"en {i} b", f"en {i} c"],
+        "summary_zh": [f"zh {i} a", f"zh {i} b", f"zh {i} c"],
+        "summary_ko": [f"ko 요약 {i}a", f"ko 요약 {i}b", f"ko 요약 {i}c"],
+    }
+
+
+def _radar_llm(n=10, supported=True):
+    """schema 이름별 큐: classify=RadarClassification, summarize=None(""), verify=RadarVerify."""
+    return {
+        "RadarClassification": [
+            RadarClassification(label="skills", confidence=0.9) for _ in range(n)
+        ],
+        "": [_summary_dict(i) for i in range(n)],
+        "RadarVerify": [RadarVerify(supported=supported) for _ in range(n)],
     }
 
 
@@ -44,13 +48,11 @@ def test_radar_full_flow():
         repos={"*": [_repo("a/x", 500), _repo("b/y", 300), _repo("c/z", 100, archived=True)]},
         readmes={"a/x": "# readme x", "b/y": "# readme y"},
     )
-    # FakeGitHub는 query별 repos dict — 모든 query에 같은 결과를 주도록 수정 불가하므로
-    # queries가 여러 개면 중복 제거로 검증
     notifier = FakeNotifier()
     adapters = {"github": gh, "notifier": notifier}
-    llm = scripted_llm(_summaries(10))
+    llm = scripted_llm(_radar_llm(10))
 
-    run = store.create_run("skill_radar", "0.1.0", {"task": "radar"}, trace_id="t")
+    run = store.create_run("skill_radar", "0.2.0", {"task": "radar"}, trace_id="t")
     runner = build_runner("skill_radar", store=store, llm=llm, settings=settings, adapters=adapters)
     runner.invoke(run.id, {"task": "radar"}, gmail_ctx={"platform": "claude", "force": True})
     # approve human stage에서 interrupt — approve로 resume
@@ -61,11 +63,15 @@ def test_radar_full_flow():
     snap = store.radar_snapshot("claude", dates[0])
     items = store.radar_items(snap["id"])
     assert len(items) >= 1
-    # archived repo는 제외
     names = [i["repo_full_name"] for i in items]
     assert "c/z" not in names
     assert items[0]["rank"] == 1
     assert items[0]["summary_ko"].startswith("ko")
+    assert items[0]["taxonomy"] == "skills"
+    # skillRadar taxonomy 라벨 체계
+    assert items[0]["summary_status"] == "ok"
+    # 플랫폼 Top1 푸시 발송
+    assert any(n["title"] == "Claude Top 1" for n in notifier.sent)
 
 
 def test_radar_dedupe_only():

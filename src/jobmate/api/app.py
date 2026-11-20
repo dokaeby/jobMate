@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
@@ -226,6 +227,29 @@ def create_app(
         )
         return response
 
+    @app.middleware("http")
+    async def access_log_middleware(request: Request, call_next: Any) -> Any:
+        """접근 로그 — IP/메서드/경로/상태/크기/소요시간/UA/요청ID.
+        쿼리스트링(secret 파라미터 포함 가능)과 요청 본문은 기록하지 않는다."""
+        started = time.perf_counter()
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        response.headers.setdefault("X-Request-ID", request_id)
+        path = request.url.path
+        client = request.client.host if request.client else "-"
+        ua = (request.headers.get("user-agent") or "-")[:80]
+        size = response.headers.get("content-length", "-")
+        msg = (
+            f"access {request.method} {path} -> {response.status_code} "
+            f'{size}B {elapsed_ms:.0f}ms ip={client} ua="{ua}" rid={request_id}'
+        )
+        if path.startswith("/api/") and path != "/api/v1/health":
+            logger.info(msg)
+        else:
+            logger.debug(msg)
+        return response
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def err(status: int, code: str, message: str, request: Request) -> JSONResponse:
@@ -344,6 +368,7 @@ def create_app(
             {"task": body.task, **({"meta": body.metadata} if body.metadata else {})},
             trace_id=uuid.uuid4().hex,
         )
+        logger.info("run created id=%s workflow=%s", run.id, body.workflow)
         _schedule_run_jobs([(run.id, body.workflow, {"task": body.task}, None)], background_tasks)
         return JSONResponse(status_code=202, content={"id": run.id, "status": run.status.value})
 
@@ -384,7 +409,9 @@ def create_app(
         try:
             runner.resume(run_id, {"decision": body.decision, "comment": body.comment})
         except Exception as e:
+            logger.warning("run %s resume failed: %s", run_id, str(e)[:200])
             return err(500, "resume_failed", str(e)[:300], request)
+        logger.info("run %s resume decision=%s", run_id, body.decision)
         d = run_detail(run_id)
         return JSONResponse(content=d or {})
 
@@ -526,6 +553,7 @@ def create_app(
             out, _usage = llm.complete(model=model, system=system, user="\n".join(lines))
             summary = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
         except Exception as e:
+            logger.warning("gmail digest failed: %s", str(e)[:200])
             return JSONResponse(content={"summary": "", "count": len(msgs), "error": str(e)[:200]})
         return JSONResponse(content={"summary": summary, "count": len(msgs)})
 
@@ -605,6 +633,7 @@ def create_app(
         try:
             listing = gmail.list_messages(query=query, max_results=limit)
         except Exception as e:
+            logger.warning("email check gmail list failed: %s", str(e)[:200])
             return JSONResponse(
                 status_code=502, content={"ok": False, "error": str(e)[:300], "cards": []}
             )
@@ -614,6 +643,7 @@ def create_app(
                 msg = gmail.get_message(mid)
             except Exception as e:
                 errors.append(f"{mid}: {str(e)[:120]}")
+                logger.warning("email check get_message failed id=%s: %s", mid, str(e)[:120])
                 continue
             summary = _summarize_email(msg)
             ts = msg.get("internal_date", "")
@@ -638,6 +668,9 @@ def create_app(
                     "url": f"https://mail.google.com/mail/u/0/#all/{mid}",
                 }
             )
+        if errors:
+            logger.warning("email check partial failures: %d/%d", len(errors), len(listing))
+        logger.info("email check done cards=%d errors=%d", len(cards), len(errors))
         return JSONResponse(
             content={"ok": True, "checked": len(cards), "cards": cards, "errors": errors}
         )
@@ -745,6 +778,7 @@ def create_app(
             task=task,
             workspace=body.workspace,
         )
+        logger.info("coding job %s queued engine=%s tool=%s", job_id, engine, tool_name)
         # 즉시 claim 시도 — 실패(중복 등)하면 디스패처가 due 시점에 회수.
         # 서버리스에는 상주 워커가 없으므로 queued로 두고 외부 워커에 위임한다.
         if os.environ.get("VERCEL"):
@@ -784,6 +818,7 @@ def create_app(
         if store.get_coding_job(job_id) is None:
             return err(404, "not_found", "coding job not found", request)
         result = store.cancel_coding_job(job_id)
+        logger.info("coding job %s cancel requested -> %s", job_id, result)
         return JSONResponse(content={"ok": result != "not_running", "status": result})
 
     @app.get("/api/v1/coding/jobs/{job_id}/events")
@@ -872,6 +907,7 @@ def create_app(
         if body.action == "reject":
             store.update_scheduled_event(event_id, status="rejected", reason="rejected_by_user")
             store.audit("", "api", "event_reject", event_id)
+            logger.info("scheduled event %s rejected via api", event_id)
             return JSONResponse(content={"ok": True, "status": "rejected"})
 
         merged = {
@@ -921,6 +957,7 @@ def create_app(
                 )
         except Exception as e:
             store.audit("", "api", "event_approve_error", event_id, {"error": str(e)[:200]})
+            logger.warning("scheduled event %s approve failed: %s", event_id, str(e)[:200])
             return err(502, "calendar_error", str(e)[:300], request)
         store.update_scheduled_event(
             event_id,
@@ -940,6 +977,7 @@ def create_app(
             event_id,
             {"calendar_event_id": cal_event_id},
         )
+        logger.info("scheduled event %s approved -> calendar_event=%s", event_id, cal_event_id)
         return JSONResponse(
             content={"ok": True, "status": "registered", "calendar_event_id": cal_event_id}
         )
@@ -985,7 +1023,7 @@ def create_app(
                         "language": i["language"],
                         "license": i["license"],
                         "taxonomy": i["taxonomy"],
-                        "summary": i.get(lang_key) or i.get("summary_ko", ""),
+                        "summary": (i.get(lang_key) or i.get("summary_ko", "")).splitlines(),
                     }
                     for i in items
                 ],
@@ -995,6 +1033,185 @@ def create_app(
     @app.get("/api/v1/radar/dates")
     def radar_dates(platform: str = "claude") -> dict[str, Any]:
         return {"platform": platform, "dates": store.radar_dates(platform)}
+
+    # ---- skillRadar 포팅: 토픽/랭킹/상세 조회 (원본 routes.py 대응) ----
+    _RADAR_TOPIC_WINDOW_DAYS = 30
+    _RADAR_TOPIC_MAX = 50
+    _RADAR_RANKING_PERIODS = {"week": 7, "month": 30}
+    _RADAR_LANGS = ("ko", "en", "zh")
+
+    def _radar_since(days: int) -> str:
+        return (datetime.now(ZoneInfo("Asia/Seoul")).date() - timedelta(days=days)).isoformat()
+
+    def _radar_recent(days: int = _RADAR_TOPIC_WINDOW_DAYS) -> list[dict[str, Any]]:
+        return store.radar_items_since(_radar_since(days))
+
+    def _radar_item_json(row: dict[str, Any], lang: str) -> dict[str, Any]:
+        lang_key = {"ko": "summary_ko", "en": "summary_en", "zh": "summary_zh"}.get(
+            lang, "summary_ko"
+        )
+        return {
+            "rank": row.get("rank"),
+            "repo": row.get("repo_full_name"),
+            "url": row.get("repo_url"),
+            "description": row.get("description"),
+            "stars": row.get("stars"),
+            "stars_today": row.get("stars_today"),
+            "language": row.get("language"),
+            "license": row.get("license"),
+            "topics": json.loads(row.get("topics_json") or "[]"),
+            "taxonomy": row.get("taxonomy"),
+            "rank_score": row.get("rank_score"),
+            "summary_status": row.get("summary_status"),
+            "platform": row.get("platform"),
+            "summary": (row.get(lang_key) or "").splitlines(),
+        }
+
+    @app.get("/api/v1/radar/topics")
+    def radar_topics() -> dict[str, Any]:
+        counts: dict[str, int] = {}
+        for row in _radar_recent():
+            for t in set(json.loads(row.get("topics_json") or "[]")):
+                counts[t] = counts.get(t, 0) + 1
+        top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:_RADAR_TOPIC_MAX]
+        return {"topics": [{"topic": t, "count": c} for t, c in top]}
+
+    @app.get("/api/v1/radar/topic-repos")
+    def radar_topic_repos(
+        request: Request,
+        topic: str,
+        platform: str = "all",
+        lang: str = "ko",
+        limit: int = 10,
+    ) -> JSONResponse:
+        if not topic or len(topic) > 100:
+            return err(400, "validation", "topic 파라미터가 필요합니다", request)
+        if platform != "all" and platform not in settings.radar_platforms:
+            return err(400, "validation", "platform은 all 또는 radar_platforms 중 하나", request)
+        if lang not in _RADAR_LANGS:
+            return err(400, "validation", "lang은 ko|en|zh 중 하나", request)
+        limit = max(1, min(limit, 50))
+        best: dict[str, dict[str, Any]] = {}
+        for row in _radar_recent():
+            if topic not in json.loads(row.get("topics_json") or "[]"):
+                continue
+            if platform != "all" and row.get("platform") != platform:
+                continue
+            prev = best.get(row["repo_full_name"])
+            if prev is None or (row.get("stars") or 0) > (prev.get("stars") or 0):
+                best[row["repo_full_name"]] = row
+        ranked = sorted(
+            best.values(),
+            key=lambda r: (
+                r.get("rank_score") if r.get("rank_score") is not None else float("-inf"),
+                r.get("stars") or 0,
+            ),
+            reverse=True,
+        )[:limit]
+        return JSONResponse(
+            content={
+                "platform": platform,
+                "date": datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat(),
+                "lang": lang,
+                "items": [_radar_item_json(r, lang) for r in ranked],
+            }
+        )
+
+    @app.get("/api/v1/radar/related-topics")
+    def radar_related_topics(request: Request, topic: str) -> JSONResponse:
+        if not topic or len(topic) > 100:
+            return err(400, "validation", "topic 파라미터가 필요합니다", request)
+        co: dict[str, int] = {}
+        for row in _radar_recent():
+            topics = set(json.loads(row.get("topics_json") or "[]"))
+            if topic not in topics:
+                continue
+            for other in topics - {topic}:
+                co[other] = co.get(other, 0) + 1
+        top = sorted(co.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        return JSONResponse(
+            content={"topic": topic, "related": [{"topic": t, "score": c} for t, c in top]}
+        )
+
+    @app.get("/api/v1/radar/ranking")
+    def radar_ranking(
+        request: Request, period: str = "week", platform: str = "all", lang: str = "ko"
+    ) -> JSONResponse:
+        days = _RADAR_RANKING_PERIODS.get(period)
+        if days is None:
+            return err(400, "validation", "period은 week|month 중 하나", request)
+        if platform != "all" and platform not in settings.radar_platforms:
+            return err(400, "validation", "platform은 all 또는 radar_platforms 중 하나", request)
+        if lang not in _RADAR_LANGS:
+            return err(400, "validation", "lang은 ko|en|zh 중 하나", request)
+        agg: dict[str, dict[str, Any]] = {}
+        for row in _radar_recent(days):
+            if platform != "all" and row.get("platform") != platform:
+                continue
+            key = row["repo_full_name"]
+            cur = agg.get(key)
+            if cur is None:
+                agg[key] = {
+                    "row": row,
+                    "appearances": 1,
+                    "gain": int(row.get("stars_today") or 0),
+                }
+                continue
+            cur["appearances"] += 1
+            cur["gain"] += int(row.get("stars_today") or 0)
+            if (row.get("collected_date") or "") > (cur["row"].get("collected_date") or ""):
+                cur["row"] = row
+        ranked = sorted(
+            agg.values(),
+            key=lambda a: (a["gain"], a["appearances"], a["row"].get("stars") or 0),
+            reverse=True,
+        )[:30]
+        items = []
+        for idx, a in enumerate(ranked, 1):
+            payload = _radar_item_json(a["row"], lang)
+            payload["rank"] = idx
+            payload["appearances"] = a["appearances"]
+            items.append(payload)
+        return JSONResponse(
+            content={
+                "platform": platform,
+                "date": datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat(),
+                "lang": lang,
+                "items": items,
+            }
+        )
+
+    @app.get("/api/v1/radar/repo/{full_name:path}")
+    def radar_repo_detail(request: Request, full_name: str, lang: str = "ko") -> JSONResponse:
+        if lang not in _RADAR_LANGS:
+            return err(400, "validation", "lang은 ko|en|zh 중 하나", request)
+        row = store.radar_repo_latest(full_name)
+        if row is None:
+            return err(404, "not_found", "수집된 저장소가 아닙니다", request)
+        topics = set(json.loads(row.get("topics_json") or "[]"))
+        co: dict[str, int] = {}
+        for other_row in _radar_recent():
+            other_topics = set(json.loads(other_row.get("topics_json") or "[]"))
+            if not (topics & other_topics):
+                continue
+            for t in other_topics - topics:
+                co[t] = co.get(t, 0) + 1
+        related = [t for t, _c in sorted(co.items(), key=lambda kv: (-kv[1], kv[0]))[:8]]
+        payload = _radar_item_json(row, lang)
+        payload.update(
+            {
+                "readme_excerpt": row.get("readme_excerpt") or "",
+                "summaries": {
+                    "en": (row.get("summary_en") or "").splitlines(),
+                    "zh": (row.get("summary_zh") or "").splitlines(),
+                    "ko": (row.get("summary_ko") or "").splitlines(),
+                },
+                "related_topics": related,
+                "collected_date": row.get("collected_date"),
+                "snapshot_platform": row.get("platform"),
+            }
+        )
+        return JSONResponse(content={"item": payload})
 
     @app.post("/api/v1/radar/refresh", status_code=202)
     def radar_refresh(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import uuid
@@ -27,6 +28,8 @@ from ..models import (
     StageRun,
     StageStatus,
 )
+
+logger = logging.getLogger("jobmate.store")
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -558,6 +561,8 @@ class Store:
             with self._conn:
                 self._conn.executescript(SCHEMA)
         self._migrate_coding_jobs()
+        # DSN/경로 원문은 자격증명을 포함할 수 있으므로 백엔드 종류만 기록한다
+        logger.info("store opened backend=%s", "postgresql" if self._pg else "sqlite")
 
     _CODING_JOB_NEW_COLS = {
         "attempts": "INTEGER NOT NULL DEFAULT 0",
@@ -1423,6 +1428,37 @@ class Store:
             " WHERE repo_full_name=? AND content_hash=?"
             " AND summary_en != '' ORDER BY id DESC LIMIT 1",
             (full_name, chash),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def radar_items_since(self, since_date: str) -> list[dict[str, Any]]:
+        """since_date 이후 수집분의 item 행 + platform/collected_date (토픽·랭킹·digest용)."""
+        rows = self._conn.execute(
+            "SELECT i.*, s.platform AS platform, s.collected_date AS collected_date"
+            " FROM radar_items i JOIN radar_snapshots s ON i.snapshot_id = s.id"
+            " WHERE s.collected_date >= ?",
+            (since_date,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def radar_repo_names_before(self, date_str: str) -> set[str]:
+        """date_str 이전에 한 번이라도 수집된 repo_full_name 집합."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT i.repo_full_name FROM radar_items i"
+            " JOIN radar_snapshots s ON i.snapshot_id = s.id"
+            " WHERE s.collected_date < ?",
+            (date_str,),
+        ).fetchall()
+        return {r["repo_full_name"] for r in rows}
+
+    def radar_repo_latest(self, full_name: str) -> dict[str, Any] | None:
+        """repo의 가장 최근 수집 item + platform/collected_date."""
+        row = self._conn.execute(
+            "SELECT i.*, s.platform AS platform, s.collected_date AS collected_date"
+            " FROM radar_items i JOIN radar_snapshots s ON i.snapshot_id = s.id"
+            " WHERE i.repo_full_name = ?"
+            " ORDER BY s.collected_date DESC, i.rank ASC LIMIT 1",
+            (full_name,),
         ).fetchone()
         return dict(row) if row else None
 

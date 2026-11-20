@@ -6,12 +6,15 @@ WorkspaceTools: 작업 디렉터리 안에 갇힌 ls/read/write/edit/glob/grep/e
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("jobmate.agent.tools")
 
 MAX_FILE_CHARS = 20_000
 MAX_OUTPUT_CHARS = 8_000
@@ -40,6 +43,7 @@ class WorkspaceTools:
         try:
             p.relative_to(self.root)
         except ValueError:
+            logger.warning("workspace path escape blocked: %s", path)
             raise ValueError(f"path escapes workspace: {path}") from None
         return p
 
@@ -151,6 +155,12 @@ class WorkspaceTools:
         argv = ["/bin/sh", "-c", command]
         if self._argv_wrap is not None:
             argv = self._argv_wrap(argv)
+        logger.debug(
+            "agent execute: %s (timeout=%ss wrapped=%s)",
+            command[:200],
+            timeout,
+            self._argv_wrap is not None,
+        )
         try:
             proc = subprocess.run(  # noqa: S603
                 argv,
@@ -161,10 +171,14 @@ class WorkspaceTools:
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
+            logger.warning("agent execute timed out after %ss: %s", timeout, command[:200])
             return f"command timed out after {timeout}s"
         except OSError as e:
+            logger.warning("agent execute failed: %s", e)
             return f"execute failed: {e}"
         out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
+        if proc.returncode != 0:
+            logger.debug("agent execute exit=%s: %s", proc.returncode, command[:200])
         return self._clip(f"exit={proc.returncode}\n{out or '(no output)'}")
 
     def call(self, name: str, args: dict[str, Any]) -> str:

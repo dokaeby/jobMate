@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from ..sensors import (
     scan_secrets,
     validate_event,
 )
+
+logger = logging.getLogger("jobmate.engine.functions")
 
 
 @dataclass
@@ -140,6 +143,7 @@ def calendar_conflict_check(ctx: FunctionContext) -> dict[str, Any]:
             ctx.store.audit(
                 ctx.run_id, "tool", "calendar_search_error", "", {"error": str(e)[:200]}
             )
+            logger.warning("calendar search_events failed run=%s: %s", ctx.run_id, str(e)[:200])
             matches = []
 
     key = _event_key(ev.get("title", ""), start_at, end_at, tz)
@@ -273,6 +277,9 @@ def gmail_register(ctx: FunctionContext) -> dict[str, Any]:
             link.id, status=LinkStatus.RETRY_WAIT, last_error=str(e)[:300], attempts_inc=True
         )
         ctx.store.audit(ctx.run_id, "tool", "calendar_error", key, {"error": str(e)[:200]})
+        logger.warning(
+            "calendar create_event failed run=%s key=%s: %s", ctx.run_id, key, str(e)[:200]
+        )
         return {"status": "retry_wait", "error": str(e)[:300]}
 
     ctx.store.update_link(link.id, status=LinkStatus.CALENDAR_CREATED, calendar_event_id=event_id)
@@ -343,6 +350,7 @@ def gmail_notify(ctx: FunctionContext) -> dict[str, Any]:
             last_error=str(e)[:300],
         )
         ctx.store.audit(ctx.run_id, "tool", "notify_failed", link.id, {"error": str(e)[:200]})
+        logger.warning("notify failed run=%s link=%s: %s", ctx.run_id, link.id, str(e)[:200])
         return {"status": "notify_failed", "notification_id": n.id, "error": str(e)[:300]}
 
 
@@ -355,6 +363,7 @@ def _send_web_push(ctx: FunctionContext, n: Any) -> None:
         push.send(title=n.title, body=n.body, source_url=n.source_url)
     except Exception as e:
         ctx.store.audit(ctx.run_id, "tool", "webpush_failed", str(n.id), {"error": str(e)[:200]})
+        logger.warning("webpush send failed run=%s: %s", ctx.run_id, str(e)[:200])
 
 
 def _schedule_event_notifications(
@@ -424,44 +433,74 @@ def radar_collect(ctx: FunctionContext) -> dict[str, Any]:
 
 
 def radar_dedupe(ctx: FunctionContext) -> dict[str, Any]:
-    """archived/fork/중복 제거 + 상한."""
+    """archived/fork/중복 제거 + stars 상위 TOP_K개만 유지 (skillRadar dedupe_filter)."""
+    from ..radar import TOP_K
+
     repos = (_prev_output(ctx, "collect") or {}).get("repos", [])
-    seen: set[str] = set()
-    out = []
+    before = len(repos)
+    best: dict[str, dict[str, Any]] = {}
     for r in repos:
         name = r.get("full_name", "")
-        if not name or name in seen:
+        if not name or r.get("archived") or r.get("fork"):
             continue
-        if r.get("archived") or r.get("fork"):
-            continue
-        seen.add(name)
-        out.append(r)
-        if len(out) >= ctx.settings.radar_max_repos:
-            break
-    return {"status": "ok", "repos": out, "dropped": len(repos) - len(out)}
+        prev = best.get(name)
+        if prev is None or int(r.get("stars", 0)) > int(prev.get("stars", 0)):
+            best[name] = r
+    out = sorted(best.values(), key=lambda x: int(x.get("stars", 0)), reverse=True)
+    cap = min(ctx.settings.radar_max_repos, TOP_K)
+    out = out[:cap]
+    return {"status": "ok", "repos": out, "dropped": before - len(out)}
+
+
+def _radar_platform_name(ctx: FunctionContext) -> str:
+    p = ctx.state.get("platform")
+    return p if p and p != "all" else "claude"
+
+
+def _radar_llm_models(ctx: FunctionContext) -> tuple[Any, Any]:
+    """(summarize용 default 티어, classify/verify용 judge=important 티어) ModelConfig."""
+    return (
+        ctx.settings.model_for("_radar", "default"),
+        ctx.settings.model_for("_radar_judge", "important"),
+    )
 
 
 def radar_summarize(ctx: FunctionContext) -> dict[str, Any]:
-    """repo별 3개 언어 요약 — content_hash 캐시 우선, LLM은 default 티어."""
-    from ..guide.loader import load_prompt
-    from ..models import RepoSummary
-    from ..radar import content_hash
+    """sanitize → classify → 3개 언어 요약. content_hash 캐시 우선.
+
+    skillRadar의 sanitize/classify/summarize 노드를 한 stage에 이식했다.
+    """
+    from ..radar import (
+        classify_repo,
+        content_hash,
+        fallback_summaries_translated,
+        new_metrics,
+        sanitize_readme,
+        summarize_repo,
+    )
 
     repos = (_prev_output(ctx, "dedupe") or {}).get("repos", [])
     if not repos:
         return {"status": "ok", "repos": []}
     if ctx.llm is None:
-        return {"status": "no_llm", "repos": repos}
+        for r in repos:
+            r["summary_status"] = "failed"
+        return {"status": "no_llm", "repos": repos, "metrics": new_metrics()}
 
-    model = ctx.settings.model_for("_radar", "default")
-    system, _pv = load_prompt("radar_summarize")
+    sum_model, judge_model = _radar_llm_models(ctx)
+    platform = _radar_platform_name(ctx)
+    metrics = new_metrics()
     out_repos: list[dict[str, Any]] = []
     tokens = {"tokens_in": 0, "tokens_out": 0}
     for r in repos:
         item = dict(r)
-        chash = content_hash(r.get("description"), r.get("readme", ""))
+        sanitized = sanitize_readme(r.get("readme"))
+        item["sanitized_readme"] = sanitized
+        item["readme_excerpt"] = sanitized[:3000]
+        chash = content_hash(r.get("description"), sanitized)
         item["content_hash"] = chash
-        cached = ctx.store.radar_cached_repo(r.get("full_name", ""), chash)
+        name = r.get("full_name", "")
+        cached = ctx.store.radar_cached_repo(name, chash)
         if cached:
             item.update(
                 {
@@ -476,85 +515,241 @@ def radar_summarize(ctx: FunctionContext) -> dict[str, Any]:
                     )
                 }
             )
+            item["_summary_en_lines"] = (cached.get("summary_en") or "").splitlines()
+            item["_cache_verified"] = cached.get("summary_status") == "ok"
             item["summary_source"] = "cache"
+            metrics["cache_hits"]["summarize"] += 1
+            metrics["cache_hits"]["classify"] += 1
             out_repos.append(item)
             continue
-        user = (
-            f"repo: {r.get('full_name')}\n"
-            f"url: {r.get('html_url')}\n"
-            f"description: {r.get('description') or ''}\n"
-            f"language: {r.get('language') or ''}\n"
-            f"topics: {', '.join(r.get('topics') or [])}\n"
-            f"license: {r.get('license') or ''}\n"
-            f"stars: {r.get('stars', 0)}\n\n"
-            f"README:\n{(r.get('readme') or '')[:3000]}"
-        )
         try:
-            parsed, usage = ctx.llm.complete(
-                model=model, system=system, user=user, schema=RepoSummary
+            cls = classify_repo(
+                ctx.llm,
+                judge_model,
+                name=name,
+                description=r.get("description"),
+                topics=list(r.get("topics") or []),
+                readme=sanitized,
             )
-            summ = parsed if isinstance(parsed, RepoSummary) else RepoSummary.model_validate(parsed)
-            item.update(summ.model_dump())
+            metrics["llm_calls"] += 1
+            item["taxonomy"] = cls.label
+            item["taxonomy_confidence"] = cls.confidence
+            summ, status = summarize_repo(
+                ctx.llm,
+                sum_model,
+                platform=platform,
+                full_name=name,
+                description=r.get("description"),
+                readme=sanitized,
+            )
+            metrics["llm_calls"] += 1
+            if summ is None:
+                fb = fallback_summaries_translated(r.get("description"), name)
+                item["summary_en"] = "\n".join(fb["en"])
+                item["summary_zh"] = "\n".join(fb["zh"])
+                item["summary_ko"] = "\n".join(fb["ko"])
+                item["_summary_en_lines"] = fb["en"]
+                item["summary_status"] = "failed"
+                metrics["summary_fallbacks"] += 1
+            else:
+                item["summary_en"] = "\n".join(summ.summary_en)
+                item["summary_zh"] = "\n".join(summ.summary_zh)
+                item["summary_ko"] = "\n".join(summ.summary_ko)
+                item["_summary_en_lines"] = list(summ.summary_en)
+                item["summary_status"] = status
             item["summary_source"] = "llm"
-            tokens["tokens_in"] += usage.get("tokens_in", 0)
-            tokens["tokens_out"] += usage.get("tokens_out", 0)
         except Exception as e:
+            fb = fallback_summaries_translated(r.get("description"), name)
             item.update(
                 {
-                    "summary_en": r.get("description") or "",
-                    "summary_zh": "",
-                    "summary_ko": r.get("description") or "",
+                    "summary_en": "\n".join(fb["en"]),
+                    "summary_zh": "\n".join(fb["zh"]),
+                    "summary_ko": "\n".join(fb["ko"]),
+                    "_summary_en_lines": fb["en"],
                     "taxonomy": "other",
                     "taxonomy_confidence": 0.0,
-                    "summary_status": "fallback",
+                    "summary_status": "failed",
                 }
             )
+            metrics["summary_fallbacks"] += 1
             item["summary_source"] = "fallback"
             ctx.store.audit(
                 ctx.run_id,
                 "tool",
                 "radar_summarize_error",
-                r.get("full_name", ""),
+                name,
                 {"error": str(e)[:200]},
             )
-        item["readme_excerpt"] = (r.get("readme") or "")[:3000]
+            logger.warning(
+                "radar summarize failed run=%s repo=%s: %s",
+                ctx.run_id,
+                name,
+                str(e)[:200],
+            )
         out_repos.append(item)
-    return {"status": "ok", "repos": out_repos, **tokens}
+    metrics["repos_processed"] = len(out_repos)
+    return {"status": "ok", "repos": out_repos, "metrics": metrics, **tokens}
+
+
+def radar_verify(ctx: FunctionContext) -> dict[str, Any]:
+    """요약 충실도 judge 검증. 실패 시 재요약 최대 2회, 초과 시 'unverified'.
+
+    skillRadar의 verify 노드 포팅. 캐시로 검증 통과한 요약은 재검증하지 않는다.
+    """
+    from ..radar import (
+        MAX_VERIFY_RETRIES,
+        new_metrics,
+        summarize_repo,
+        verify_summary,
+    )
+
+    prev = _prev_output(ctx, "summarize") or {}
+    repos = prev.get("repos", [])
+    metrics = prev.get("metrics") or new_metrics()
+    if not repos or ctx.llm is None:
+        return {"status": "ok", "repos": repos, "metrics": metrics}
+
+    _sum_model, judge_model = _radar_llm_models(ctx)
+    platform = _radar_platform_name(ctx)
+    retries: dict[str, int] = {}
+
+    for item in repos:
+        name = item.get("full_name", "")
+        if item.get("summary_status") != "ok":
+            continue
+        if item.get("_cache_verified"):
+            metrics["cache_hits"]["verify"] += 1
+            continue
+        readme = item.get("sanitized_readme") or item.get("readme") or ""
+        try:
+            ok = verify_summary(
+                ctx.llm,
+                judge_model,
+                readme=readme,
+                summary_lines=item.get("_summary_en_lines") or [],
+            )
+            metrics["llm_calls"] += 1
+            metrics["verify_calls"] += 1
+            if ok:
+                metrics["verify_passed"] += 1
+            while not ok and retries.get(name, 0) < MAX_VERIFY_RETRIES:
+                retries[name] = retries.get(name, 0) + 1
+                summ, status = summarize_repo(
+                    ctx.llm,
+                    _sum_model,
+                    platform=platform,
+                    full_name=name,
+                    description=item.get("description"),
+                    readme=readme,
+                )
+                metrics["llm_calls"] += 1
+                if summ is not None:
+                    item["summary_en"] = "\n".join(summ.summary_en)
+                    item["summary_zh"] = "\n".join(summ.summary_zh)
+                    item["summary_ko"] = "\n".join(summ.summary_ko)
+                    item["_summary_en_lines"] = list(summ.summary_en)
+                    item["summary_status"] = status
+                ok = verify_summary(
+                    ctx.llm,
+                    judge_model,
+                    readme=readme,
+                    summary_lines=item.get("_summary_en_lines") or [],
+                )
+                metrics["llm_calls"] += 1
+                metrics["verify_calls"] += 1
+                if ok:
+                    metrics["verify_passed"] += 1
+            if not ok:
+                item["summary_status"] = "unverified"
+        except Exception as e:
+            logger.warning("radar verify failed run=%s repo=%s: %s", ctx.run_id, name, str(e)[:200])
+            ctx.store.audit(ctx.run_id, "tool", "radar_verify_error", name, {"error": str(e)[:200]})
+    return {"status": "ok", "repos": repos, "metrics": metrics}
 
 
 def radar_rank(ctx: FunctionContext) -> dict[str, Any]:
-    """stars + 증가량 + 라이선스/분류 신뢰도 점수로 정렬."""
+    """플랫폼별 rank_score 정렬·상위 FINAL_TOP_N (skillRadar rank 노드)."""
     from zoneinfo import ZoneInfo
 
-    from ..radar import stars_delta
+    from ..radar import FINAL_TOP_N, rank_score, stars_delta
 
-    repos = (_prev_output(ctx, "summarize") or {}).get("repos", [])
+    prev_out = _prev_output(ctx, "verify") or _prev_output(ctx, "summarize") or {}
+    repos = prev_out.get("repos", [])
+    metrics = prev_out.get("metrics")
     today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
-    # 플랫폼별 prev stars — publish가 플랫폼 단위로 snapshot을 쓰므로
-    # 여기서는 repo의 platform 필드 기준으로 조회
     prev_cache: dict[str, dict[str, int]] = {}
+    by_platform: dict[str, list[dict[str, Any]]] = {}
     for r in repos:
         p = r.get("platform", "")
         if p not in prev_cache:
             prev_cache[p] = ctx.store.radar_prev_stars(p, today)
         prev = prev_cache[p].get(r.get("full_name", ""))
         r["stars_today"] = stars_delta(int(r.get("stars", 0)), prev)
-        score = (
-            int(r.get("stars", 0))
-            + (r["stars_today"] or 0) * 2
-            + (50 if r.get("license") else 0)
-            + float(r.get("taxonomy_confidence", 0.0)) * 10
+        r["rank_score"] = rank_score(
+            int(r.get("stars", 0)),
+            r.get("summary_status") == "ok",
+            float(r.get("taxonomy_confidence", 0.0)),
         )
-        r["rank_score"] = score
-    repos.sort(key=lambda x: x["rank_score"], reverse=True)
-    for i, r in enumerate(repos, 1):
+        by_platform.setdefault(p, []).append(r)
+    ranked: list[dict[str, Any]] = []
+    for items in by_platform.values():
+        items.sort(key=lambda x: x["rank_score"], reverse=True)
+        ranked.extend(items[:FINAL_TOP_N])
+    for i, r in enumerate(ranked, 1):
         r["rank"] = i
-    platforms = sorted({r.get("platform", "") for r in repos})
-    return {"status": "ok", "repos": repos, "date": today, "platforms": platforms}
+    platforms = sorted(by_platform)
+    return {
+        "status": "ok",
+        "repos": ranked,
+        "date": today,
+        "platforms": platforms,
+        "metrics": metrics,
+    }
+
+
+def _radar_notify(ctx: FunctionContext, title: str, body: str, url: str = "") -> None:
+    """notifier adapter 발송 — 실패는 audit+warning으로 격리."""
+    notifier = ctx.adapters.get("notifier")
+    if notifier is None:
+        return
+    try:
+        notifier.send(title=title, body=body, source_url=url)
+    except Exception as e:
+        ctx.store.audit(ctx.run_id, "tool", "radar_notify_error", "", {"error": str(e)[:200]})
+        logger.warning("radar notify failed run=%s: %s", ctx.run_id, str(e)[:200])
+
+
+def _radar_weekly_digest(ctx: FunctionContext, today: str) -> None:
+    """KST 월요일 수집분에 주간 digest 푸시 (skillRadar notify_weekly_digest 포팅)."""
+    since = (datetime.fromisoformat(today).date() - timedelta(days=7)).isoformat()
+    rows = ctx.store.radar_items_since(since)
+    if not rows:
+        return
+    gain: dict[str, int] = {}
+    window: set[str] = set()
+    for row in rows:
+        name = row["repo_full_name"]
+        window.add(name)
+        gain[name] = gain.get(name, 0) + int(row.get("stars_today") or 0)
+    prior = ctx.store.radar_repo_names_before(since)
+    new_entries = window - prior
+    exited = prior - window
+    top = sorted(gain.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    top_label = ", ".join(f"{n} +{g}" for n, g in top if g > 0) or "-"
+    total_gain = sum(gain.values())
+    body = (
+        f"신규 {len(new_entries)}개 · 이탈 {len(exited)}개 · "
+        f"주간 star 증가 {total_gain:,}\n급상승: {top_label}"
+    )
+    _radar_notify(ctx, "SkillRadar 주간 리포트", body)
 
 
 def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
-    """승인된 결과를 플랫폼별 snapshot/item으로 저장 + 알림."""
+    """승인된 결과를 플랫폼별 snapshot/item으로 저장 + Top1/주간 푸시."""
+    from zoneinfo import ZoneInfo
+
+    from ..radar import metrics_dict
+
     approval = ctx.state.get("approval") or {}
     if approval.get("decision") != "approve":
         return {"status": "rejected"}
@@ -562,11 +757,14 @@ def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
     repos = rank_out.get("repos", [])
     date_str = rank_out.get("date") or ""
     force = bool(ctx.state.get("force"))
-    notifier = ctx.adapters.get("notifier")
 
     by_platform: dict[str, list[dict[str, Any]]] = {}
     for r in repos:
         by_platform.setdefault(r.get("platform", "unknown"), []).append(r)
+
+    snap_metrics = {"count": len(repos), "run_id": ctx.run_id}
+    if rank_out.get("metrics"):
+        snap_metrics["radar"] = metrics_dict(rank_out["metrics"])
 
     written: dict[str, int] = {}
     for platform, items in by_platform.items():
@@ -576,14 +774,13 @@ def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
             snap = ctx.store.radar_snapshot(platform, date_str)
             if snap:
                 ctx.store.delete_radar_snapshot(int(snap["id"]))
-        snap_id = ctx.store.save_radar_snapshot(
-            platform, date_str, {"count": len(items), "run_id": ctx.run_id}
-        )
-        for it in items:
+        items = sorted(items, key=lambda x: x.get("rank_score", 0), reverse=True)
+        snap_id = ctx.store.save_radar_snapshot(platform, date_str, snap_metrics)
+        for i, it in enumerate(items, 1):
             ctx.store.add_radar_item(
                 snap_id,
                 {
-                    "rank": it.get("rank", 0),
+                    "rank": i,
                     "repo_full_name": it.get("full_name", ""),
                     "repo_url": it.get("html_url", ""),
                     "description": it.get("description") or "",
@@ -605,17 +802,23 @@ def radar_publish(ctx: FunctionContext) -> dict[str, Any]:
             )
         written[platform] = len(items)
 
-    if notifier is not None and written:
-        total = sum(written.values())
-        try:
-            notifier.send(
-                title=f"skillRadar 수집 완료 ({date_str})",
-                body=f"{total}개 저장소 스냅샷 저장: "
-                + ", ".join(f"{k} {v}" for k, v in written.items()),
-                source_url="",
-            )
-        except Exception as e:
-            ctx.store.audit(ctx.run_id, "tool", "radar_notify_error", "", {"error": str(e)[:200]})
+    # skillRadar notify_daily_top: 플랫폼별 Top1 푸시
+    for platform, items in by_platform.items():
+        if platform not in written or not items:
+            continue
+        top = max(items, key=lambda x: x.get("rank_score", 0))
+        _radar_notify(
+            ctx,
+            f"{platform.capitalize()} Top 1",
+            f"{top.get('full_name', '')} ⭐{top.get('stars', 0)}",
+            top.get("html_url", ""),
+        )
+    if not written and repos:
+        _radar_notify(ctx, "SkillRadar 수집 실패", f"{date_str} 스냅샷 저장 실패")
+    # KST 월요일 수집분에는 주간 digest 추가 발송
+    if written and datetime.now(ZoneInfo("Asia/Seoul")).weekday() == 0:
+        _radar_weekly_digest(ctx, date_str)
+    logger.info("radar published run=%s written=%s date=%s", ctx.run_id, written, date_str)
     return {"status": "published", "written": written, "date": date_str}
 
 
@@ -628,6 +831,7 @@ FUNCTIONS: dict[str, Callable[[FunctionContext], dict[str, Any]]] = {
     "radar_collect": radar_collect,
     "radar_dedupe": radar_dedupe,
     "radar_summarize": radar_summarize,
+    "radar_verify": radar_verify,
     "radar_rank": radar_rank,
     "radar_publish": radar_publish,
 }

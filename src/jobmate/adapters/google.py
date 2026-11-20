@@ -23,6 +23,18 @@ import httpx
 
 logger = logging.getLogger("jobmate.adapters.google")
 
+
+def _raise_for_status(r: httpx.Response, api: str) -> None:
+    """4xx/5xx를 WARNING 로그로 남긴 뒤 raise_for_status. 토큰·자격증명은 기록하지 않는다."""
+    if r.status_code >= 400:
+        try:
+            path = r.request.url.path
+        except Exception:
+            path = ""
+        logger.warning("%s api error: status=%s path=%s", api, r.status_code, path)
+    r.raise_for_status()
+
+
 TOKEN_URI = "https://oauth2.googleapis.com/token"  # noqa: S105 - URL 상수
 AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -68,7 +80,7 @@ class _GoogleAuth:
         body = r.json()
         self._access_token = body["access_token"]
         self._expires_at = time.time() + float(body.get("expires_in", 3600))
-        logger.debug("google access token refreshed, expires_in=%ss", body.get("expires_in"))
+        logger.info("google access token refreshed, expires_in=%ss", body.get("expires_in"))
 
     def headers(self) -> dict[str, str]:
         if not self._access_token or time.time() >= self._expires_at - 60:
@@ -192,7 +204,7 @@ class GoogleGmail:
             params={"q": query, "maxResults": max_results},
             headers=self._auth.headers(),
         )
-        r.raise_for_status()
+        _raise_for_status(r, "gmail list_messages")
         return [{"id": m["id"]} for m in r.json().get("messages", [])]
 
     def get_message(self, message_id: str) -> dict[str, Any]:
@@ -201,7 +213,7 @@ class GoogleGmail:
             params={"format": "full"},
             headers=self._auth.headers(),
         )
-        r.raise_for_status()
+        _raise_for_status(r, "gmail get_message")
         msg = r.json()
         payload = msg.get("payload") or {}
         return {
@@ -272,7 +284,7 @@ class GoogleCalendar:
             ),
             headers=self._auth.headers(),
         )
-        r.raise_for_status()
+        _raise_for_status(r, "calendar create_event")
         return r.json()["id"]
 
     def find_by_marker(self, marker: str) -> str | None:
@@ -285,7 +297,7 @@ class GoogleCalendar:
             },
             headers=self._auth.headers(),
         )
-        r.raise_for_status()
+        _raise_for_status(r, "calendar find_by_marker")
         items = r.json().get("items", [])
         return items[0]["id"] if items else None
 
@@ -307,7 +319,7 @@ class GoogleCalendar:
             r = self._client.get(
                 f"{CALENDAR_API}/events", params=params, headers=self._auth.headers()
             )
-            r.raise_for_status()
+            _raise_for_status(r, "calendar search_events")
             body = r.json()
             for ev in body.get("items", []):
                 marker = (
@@ -332,7 +344,7 @@ class GoogleCalendar:
         r = self._client.get(f"{CALENDAR_API}/events/{event_id}", headers=self._auth.headers())
         if r.status_code == 404:
             return None
-        r.raise_for_status()
+        _raise_for_status(r, "calendar get_event")
         ev = r.json()
         return {
             "id": ev.get("id"),

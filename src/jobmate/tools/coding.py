@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -15,6 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+logger = logging.getLogger("jobmate.tools.coding")
 
 MAX_OUTPUT_CHARS = 60_000
 MAX_DIFF_CHARS = 200_000
@@ -74,7 +77,15 @@ def _run_cmd(
             text=True,
         )
     except FileNotFoundError as e:
+        logger.warning("coding tool binary not found: %s", argv[0])
         raise CodingToolError(f"{argv[0]} not found") from e
+    logger.debug(
+        "coding tool exec: %s cwd=%s timeout=%ss wrapped=%s",
+        argv[0],
+        cwd,
+        timeout,
+        argv_wrap is not None,
+    )
     deadline = time.monotonic() + timeout
     cancelled = False
     while True:
@@ -90,10 +101,14 @@ def _run_cmd(
             if time.monotonic() >= deadline:
                 proc.kill()
                 proc.communicate()
+                logger.warning("coding tool timed out: %s after %ss", argv[0], timeout)
                 raise CodingToolError(f"{argv[0]} timed out after {timeout}s") from None
     out = (stdout or "") + ("\n" + stderr if stderr else "")
     if cancelled:
+        logger.info("coding tool cancelled: %s", argv[0])
         return -15, "(cancelled)\n" + out[:MAX_OUTPUT_CHARS]
+    if proc.returncode != 0:
+        logger.warning("coding tool %s exited %s", argv[0], proc.returncode)
     return proc.returncode, out[:MAX_OUTPUT_CHARS]
 
 

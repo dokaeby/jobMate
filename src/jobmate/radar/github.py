@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger("jobmate.radar")
 
 SEARCH_URL = "https://api.github.com/search/repositories"
 CONTENTS_URL = "https://api.github.com/repos/{full_name}/readme"
@@ -43,13 +46,6 @@ def load_queries(path: Path | None = None) -> dict[str, list[str]]:
     return {k: list(v) for k, v in data.items()}
 
 
-def content_hash(description: str | None, readme: str) -> str:
-    import hashlib
-
-    raw = f"{description or ''}\n{readme}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
 def stars_delta(current: int, previous: int | None) -> int | None:
     if previous is None:
         return None
@@ -75,11 +71,19 @@ class GitHubAPI:
 
     def _get_json(self, url: str, params: dict | None = None) -> dict | None:
         delay = self._backoff
+        path = url.split("?", 1)[0]
         for attempt in range(self._max_retries + 1):
             try:
                 resp = self._client.get(url, params=params, headers=self._headers())
-            except httpx.HTTPError:
+            except httpx.HTTPError as e:
                 if attempt == self._max_retries:
+                    logger.warning(
+                        "github api error path=%s attempt=%d/%d: %s",
+                        path,
+                        attempt + 1,
+                        self._max_retries + 1,
+                        str(e)[:120],
+                    )
                     return None
                 time.sleep(delay)
                 delay *= 2
@@ -88,11 +92,18 @@ class GitHubAPI:
                 return resp.json()
             if resp.status_code in (403, 429, 500, 502, 503):
                 if attempt == self._max_retries:
+                    logger.warning(
+                        "github api error path=%s status=%s after %d attempts",
+                        path,
+                        resp.status_code,
+                        self._max_retries + 1,
+                    )
                     return None
                 ra = resp.headers.get("Retry-After")
                 time.sleep(min(float(ra) if ra else delay, 60.0))
                 delay *= 2
                 continue
+            logger.warning("github api error path=%s status=%s", path, resp.status_code)
             return None
         return None
 
@@ -132,8 +143,8 @@ class GitHubAPI:
             )
             if resp.status_code == 200 and resp.text:
                 return resp.text[:MAX_README_CHARS]
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as e:
+            logger.debug("github readme fetch error %s: %s", full_name, str(e)[:120])
         data = self._get_json(url)
         if not data:
             return ""
@@ -141,7 +152,8 @@ class GitHubAPI:
             return base64.b64decode(data.get("content") or "").decode("utf-8", errors="replace")[
                 :MAX_README_CHARS
             ]
-        except Exception:
+        except Exception as e:
+            logger.debug("github readme decode failed %s: %s", full_name, str(e)[:120])
             return ""
 
     def close(self) -> None:
