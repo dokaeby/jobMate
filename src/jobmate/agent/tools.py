@@ -23,10 +23,15 @@ EXECUTE_TIMEOUT_MAX = 600
 class WorkspaceTools:
     """workspace 내 파일/셸 프리미티브. 각 메서드는 str 결과를 반환한다."""
 
-    def __init__(self, workspace: str | Path) -> None:
+    def __init__(
+        self,
+        workspace: str | Path,
+        argv_wrap: Callable[[list[str]], list[str]] | None = None,
+    ) -> None:
         self.root = Path(workspace).resolve()
         if not self.root.is_dir():
             raise FileNotFoundError(f"workspace not found: {workspace}")
+        self._argv_wrap = argv_wrap
 
     def _resolve(self, path: str) -> Path:
         raw = Path(path)
@@ -143,10 +148,12 @@ class WorkspaceTools:
     def execute(self, command: str, timeout: int = EXECUTE_TIMEOUT) -> str:
         timeout = min(max(1, int(timeout)), EXECUTE_TIMEOUT_MAX)
         env = dict(os.environ, PWD=str(self.root))
+        argv = ["/bin/sh", "-c", command]
+        if self._argv_wrap is not None:
+            argv = self._argv_wrap(argv)
         try:
-            proc = subprocess.run(  # noqa: S603,S602 - workspace 내 명령 실행이 도구의 목적
-                command,
-                shell=True,
+            proc = subprocess.run(  # noqa: S603
+                argv,
                 cwd=self.root,
                 env=env,
                 capture_output=True,

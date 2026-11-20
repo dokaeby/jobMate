@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -34,27 +36,64 @@ class CodingTool(Protocol):
         """CLI 바이너리가 PATH에 있는지."""
         ...
 
-    def run(self, *, prompt: str, cwd: str, timeout: float) -> CodingToolResult: ...
+    def run(
+        self,
+        *,
+        prompt: str,
+        cwd: str,
+        timeout: float,
+        cancel_check: Callable[[], bool] | None = None,
+        argv_wrap: Callable[[list[str]], list[str]] | None = None,
+    ) -> CodingToolResult: ...
 
 
 class CodingToolError(Exception):
     pass
 
 
-def _run_cmd(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]:
+def _run_cmd(
+    argv: list[str],
+    cwd: str,
+    timeout: float,
+    cancel_check: Callable[[], bool] | None = None,
+    argv_wrap: Callable[[list[str]], list[str]] | None = None,
+) -> tuple[int, str]:
+    # subprocess cwd= 는 PWD 환경변수를 갱신하지 않는다. opencode 등
+    # $PWD를 작업 디렉터리로 쓰는 CLI가 부모 셸의 디렉터리에 쓰는 것을
+    # 막기 위해 명시적으로 설정한다.
+    env = {**os.environ, "PWD": os.path.abspath(cwd)}
+    if argv_wrap is not None:
+        argv = argv_wrap(argv)
     try:
-        # subprocess cwd= 는 PWD 환경변수를 갱신하지 않는다. opencode 등
-        # $PWD를 작업 디렉터리로 쓰는 CLI가 부모 셸의 디렉터리에 쓰는 것을
-        # 막기 위해 명시적으로 설정한다.
-        env = {**os.environ, "PWD": os.path.abspath(cwd)}
-        proc = subprocess.run(  # noqa: S603
-            argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout
+        proc = subprocess.Popen(  # noqa: S603
+            argv,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
     except FileNotFoundError as e:
         raise CodingToolError(f"{argv[0]} not found") from e
-    except subprocess.TimeoutExpired as e:
-        raise CodingToolError(f"{argv[0]} timed out after {timeout}s") from e
-    out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    deadline = time.monotonic() + timeout
+    cancelled = False
+    while True:
+        try:
+            stdout, stderr = proc.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            if cancel_check is not None and cancel_check():
+                cancelled = True
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                break
+            if time.monotonic() >= deadline:
+                proc.kill()
+                proc.communicate()
+                raise CodingToolError(f"{argv[0]} timed out after {timeout}s") from None
+    out = (stdout or "") + ("\n" + stderr if stderr else "")
+    if cancelled:
+        return -15, "(cancelled)\n" + out[:MAX_OUTPUT_CHARS]
     return proc.returncode, out[:MAX_OUTPUT_CHARS]
 
 
@@ -104,10 +143,18 @@ class _CliCodingTool:
     def available(self) -> bool:
         return shutil.which(self.binary) is not None
 
-    def run(self, *, prompt: str, cwd: str, timeout: float) -> CodingToolResult:
+    def run(
+        self,
+        *,
+        prompt: str,
+        cwd: str,
+        timeout: float,
+        cancel_check: Callable[[], bool] | None = None,
+        argv_wrap: Callable[[list[str]], list[str]] | None = None,
+    ) -> CodingToolResult:
         if not self.available():
             raise CodingToolError(f"{self.name}: {self.binary} not on PATH")
-        code, out = _run_cmd(self.argv(prompt), cwd, timeout)
+        code, out = _run_cmd(self.argv(prompt), cwd, timeout, cancel_check, argv_wrap)
         return CodingToolResult(
             ok=code == 0, text=out, diff=workspace_diff(cwd), exit_code=code, tool=self.name
         )

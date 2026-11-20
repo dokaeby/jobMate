@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -66,8 +68,17 @@ class CodingAgent:
         model: str = "",
         max_steps: int = MAX_STEPS,
         timeout: float | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        on_step: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> dict[str, Any]:
-        tools = WorkspaceTools(workspace)
+        from ..sandbox import make_wrapper
+
+        wrap = make_wrapper(
+            str(Path(workspace).resolve()),
+            getattr(self._settings, "coding_sandbox", "none"),
+            getattr(self._settings, "coding_sandbox_image", "python:3.12-slim"),
+        )
+        tools = WorkspaceTools(workspace, argv_wrap=wrap)
         cfg = self._settings.model_for("coding_agent", "important")
         if model:
             cfg = cfg.model_copy(update={"model": model})
@@ -78,6 +89,9 @@ class CodingAgent:
         status, answer, error = "done", "", ""
 
         for i in range(max_steps):
+            if cancel_check is not None and cancel_check():
+                status, error = "cancelled", "cancelled by user"
+                break
             if time.monotonic() > deadline:
                 status, error = "timeout", f"agent timeout after {budget}s"
                 break
@@ -104,6 +118,8 @@ class CodingAgent:
                     "result": result[:RESULT_PREVIEW],
                 }
             )
+            if on_step is not None:
+                on_step(list(steps))
         else:
             status, error = "max_steps", f"reached max_steps={max_steps}"
 

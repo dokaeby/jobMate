@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import threading
 import uuid
 from collections.abc import AsyncIterator
@@ -58,6 +57,14 @@ class ApprovalRequest(BaseModel):
     comment: str = ""
 
 
+class CodingRunRequest(BaseModel):
+    engine: str = ""  # ""|"cli"|"agent"
+    tool: str = ""
+    model: str = ""
+    task: str = ""
+    workspace: str = ""
+
+
 def _default_adapters(settings: Settings, store: Store) -> dict[str, Any]:
     from ..adapters.google import GoogleCalendar, GoogleGmail
 
@@ -91,6 +98,9 @@ def create_app(
     llm = llm or CompositeLLM()
     adapters = adapters if adapters is not None else _default_adapters(settings, store)
     stop_event = threading.Event()
+    from ..coding_worker import CodingJobWorker
+
+    coding_worker = CodingJobWorker(store, settings, llm)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -107,8 +117,10 @@ def create_app(
                 daemon=True,
             )
             worker.start()
+            coding_worker.start()
         yield
         stop_event.set()
+        coding_worker.stop()
         store.close()
 
     app = FastAPI(title="jobMate Harness", version="0.1.0", lifespan=lifespan)
@@ -553,47 +565,8 @@ def create_app(
         return JSONResponse(content={"ok": True, "prefs": p, "cronjob": cronjob})
 
     # ---------- coding tool (코드 어댑터) ----------
-    coding_jobs: dict[str, dict[str, Any]] = {}
-    coding_jobs_lock = threading.Lock()
-
-    def _coding_workspace(job_id: str, custom: str = "") -> str:
-        """작업 디렉터리. custom이 있으면 그대로, 없으면 run별 git repo 생성."""
-        from ..tools.coding import CodingToolError
-
-        if custom:
-            p = Path(custom).expanduser()
-            if not p.is_dir():
-                raise CodingToolError(f"workspace not found: {custom}")
-            return str(p)
-        if settings.coding_workspace:
-            return settings.coding_workspace
-        ws = Path(settings.db_path).parent / "workspaces" / f"coding-{job_id}"
-        if not (ws / ".git").exists():
-            ws.mkdir(parents=True, exist_ok=True)
-            subprocess.run(  # noqa: S603
-                ["git", "init", "-q"],  # noqa: S607
-                cwd=ws,
-                check=True,
-                timeout=30,
-            )
-            subprocess.run(  # noqa: S603
-                [  # noqa: S607
-                    "git",
-                    "-c",
-                    "user.email=jobmate@local",
-                    "-c",
-                    "user.name=jobmate",
-                    "commit",
-                    "-q",
-                    "--allow-empty",
-                    "-m",
-                    "init",
-                ],
-                cwd=ws,
-                check=True,
-                timeout=30,
-            )
-        return str(ws)
+    # job 상태는 coding_jobs 테이블에 영속화 — CodingJobWorker가 큐/lease/
+    # 재시도/샌드박스를 담당하고 이 라우트들은 등록·조회·취소·SSE만 담당한다.
 
     @app.get("/api/v1/coding/tools")
     def coding_tools() -> dict[str, Any]:
@@ -616,13 +589,13 @@ def create_app(
         }
 
     @app.post("/api/v1/coding/run")
-    def coding_run(body: dict[str, Any], request: Request) -> JSONResponse:
+    def coding_run(body: CodingRunRequest, request: Request) -> JSONResponse:
         from ..tools.coding import build_coding_tool
 
-        engine = str(body.get("engine") or "").strip().lower()
+        engine = body.engine.strip().lower()
         pref_tool = _prefs().get("coding_tool")
-        tool_name = str(body.get("tool") or pref_tool or settings.coding_tool)
-        task = str(body.get("task") or "").strip()
+        tool_name = (body.tool or pref_tool or settings.coding_tool).strip().lower()
+        task = body.task.strip()
         if not task:
             return err(422, "validation", "task is required", request)
         if engine == "agent" or tool_name == "agent":
@@ -630,97 +603,82 @@ def create_app(
             tool = None
         else:
             engine = "cli"
-            tool = build_coding_tool(
-                tool_name, model=str(body.get("model") or settings.coding_model or "") or None
-            )
+            tool = build_coding_tool(tool_name, model=body.model or settings.coding_model or None)
             if tool is None:
                 return err(400, "unknown_tool", f"unknown coding tool: {tool_name}", request)
             if not tool.available():
                 return err(503, "tool_unavailable", f"{tool_name} CLI not found on PATH", request)
         job_id = uuid.uuid4().hex[:12]
-        with coding_jobs_lock:
-            coding_jobs[job_id] = {
-                "job_id": job_id,
-                "status": "running",
-                "engine": engine,
-                "tool": tool_name,
-                "model": body.get("model") or settings.coding_model or "",
-                "task": task[:500],
-                "created_at": datetime.now(UTC).isoformat(),
-                "workspace": "",
-                "ok": None,
-                "text": "",
-                "answer": "",
-                "steps": [],
-                "diff": "",
-                "error": "",
-            }
-
-        def worker() -> None:
-            try:
-                cwd = _coding_workspace(job_id, str(body.get("workspace") or ""))
-                if engine == "agent":
-                    from ..agent import CodingAgent
-                    from ..tools.coding import workspace_diff
-
-                    agent_res = CodingAgent(llm, settings).run(
-                        task,
-                        cwd,
-                        model=str(body.get("model") or ""),
-                        timeout=settings.coding_timeout_seconds,
-                    )
-                    ok = agent_res["status"] == "done"
-                    with coding_jobs_lock:
-                        coding_jobs[job_id].update(
-                            status="done" if ok else "failed",
-                            ok=ok,
-                            text=agent_res["answer"],
-                            answer=agent_res["answer"],
-                            steps=agent_res["steps"],
-                            diff=workspace_diff(cwd),
-                            workspace=cwd,
-                            error=agent_res["error"] or ("" if ok else agent_res["status"]),
-                        )
-                    store.audit(
-                        "",
-                        "tool:agent",
-                        "coding_run",
-                        job_id,
-                        {"status": agent_res["status"], "steps": len(agent_res["steps"])},
-                    )
-                    return
-                assert tool is not None
-                res = tool.run(prompt=task, cwd=cwd, timeout=settings.coding_timeout_seconds)
-                with coding_jobs_lock:
-                    coding_jobs[job_id].update(
-                        status="done",
-                        ok=res.ok,
-                        text=res.text,
-                        diff=res.diff,
-                        workspace=cwd,
-                        exit_code=res.exit_code,
-                    )
-                store.audit(
-                    "",
-                    f"tool:{res.tool}",
-                    "coding_run",
-                    job_id,
-                    {"exit_code": res.exit_code, "diff_chars": len(res.diff)},
-                )
-            except Exception as e:
-                with coding_jobs_lock:
-                    coding_jobs[job_id].update(status="failed", error=str(e)[:500])
-
-        threading.Thread(target=worker, daemon=True).start()
+        model_name = body.model or settings.coding_model or ""
+        store.create_coding_job(
+            job_id,
+            engine=engine,
+            tool=tool_name,
+            model=model_name,
+            task=task,
+            workspace=body.workspace,
+        )
+        # 즉시 claim 시도 — 실패(중복 등)하면 디스패처가 due 시점에 회수
+        coding_worker.submit(job_id)
         return JSONResponse(status_code=202, content={"job_id": job_id})
+
+    @app.get("/api/v1/coding/jobs")
+    def coding_jobs_list(request: Request) -> JSONResponse:
+        try:
+            limit = min(int(request.query_params.get("limit", "20")), 100)
+        except ValueError:
+            limit = 20
+        return JSONResponse(content={"jobs": store.list_coding_jobs(limit)})
 
     @app.get("/api/v1/coding/jobs/{job_id}")
     def coding_job(job_id: str, request: Request) -> JSONResponse:
-        with coding_jobs_lock:
-            job = coding_jobs.get(job_id)
+        job = store.get_coding_job(job_id)
         if job is None:
             return err(404, "not_found", "coding job not found", request)
-        return JSONResponse(content=dict(job))
+        job["job_id"] = job["id"]
+        return JSONResponse(content=job)
+
+    @app.post("/api/v1/coding/jobs/{job_id}/cancel")
+    def coding_job_cancel(job_id: str, request: Request) -> JSONResponse:
+        if store.get_coding_job(job_id) is None:
+            return err(404, "not_found", "coding job not found", request)
+        result = store.cancel_coding_job(job_id)
+        return JSONResponse(content={"ok": result != "not_running", "status": result})
+
+    @app.get("/api/v1/coding/jobs/{job_id}/events")
+    async def coding_job_events(job_id: str, request: Request) -> Any:
+        """SSE 스트림 — job 상태/스텝이 바뀔 때마다 data 이벤트 전송."""
+        from fastapi.responses import StreamingResponse
+
+        if store.get_coding_job(job_id) is None:
+            return err(404, "not_found", "coding job not found", request)
+
+        async def stream() -> Any:
+            import asyncio
+            import json as _json
+
+            last_sig = ""
+            ticks = 0
+            while True:
+                job = store.get_coding_job(job_id)
+                if job is None:
+                    break
+                sig = f"{job['status']}|{job.get('updated_at')}|{len(job.get('steps') or [])}"
+                if sig != last_sig:
+                    last_sig = sig
+                    yield f"data: {_json.dumps(job, ensure_ascii=False)}\n\n"
+                if job["status"] in ("done", "failed", "cancelled"):
+                    break
+                ticks += 1
+                if ticks % 20 == 0:
+                    yield ": hb\n\n"
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/v1/messages/{provider}/{source_id}/retry")
     def retry_message(provider: str, source_id: str, request: Request) -> JSONResponse:

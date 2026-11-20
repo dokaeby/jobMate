@@ -198,11 +198,16 @@
               placeholder="예: hello.txt 파일을 만들고 내용을 'hello'로 작성"></textarea></label>
           <div>
             <button id="coding-run">실행</button>
+            <button id="coding-cancel" class="secondary" hidden>취소</button>
             <span class="status-line" id="coding-status" role="status"></span>
           </div>
         </div>
       </div>
       <div id="coding-result"></div>
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin:0 0 10px;font-size:14px">최근 작업</h3>
+        <div id="coding-jobs"></div>
+      </div>
     </section>
 
     <!-- Calendar -->
@@ -303,11 +308,15 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-async function api(path, opts, _retried) {
-  opts = opts || {};
-  const headers = Object.assign({}, opts.headers);
+function apiHeaders() {
+  const headers = {};
   const key = localStorage.getItem("jobmate_api_key") || "";
   if (key) headers["X-API-Key"] = key;
+  return headers;
+}
+async function api(path, opts, _retried) {
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers, apiHeaders());
   const r = await fetch(API + path, Object.assign({}, opts, {headers}));
   if (r.status === 401 && !_retried) {
     const k = prompt("API 키를 입력하세요 (서버 JOBMATE_API_KEY)");
@@ -409,6 +418,7 @@ async function retryMsg(provider, sid) {
 /* ── 코드 어댑터 ── */
 let codingPoll = null;
 async function loadCoding() {
+  loadCodingJobs();
   if ($("#coding-tool").options.length) return;
   try {
     const d = await api("/coding/tools");
@@ -434,6 +444,7 @@ $("#coding-run").addEventListener("click", async () => {
   const st = $("#coding-status");
   st.textContent = "실행 중…"; st.className = "status-line";
   $("#coding-result").innerHTML = "";
+  $("#coding-cancel").hidden = false;
   try {
     const r = await api("/coding/run", {method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -445,45 +456,134 @@ $("#coding-run").addEventListener("click", async () => {
     pollCodingJob(r.job_id);
   } catch (e) { st.textContent = e.message; st.className = "status-line err"; }
 });
-function pollCodingJob(jobId) {
+$("#coding-cancel").addEventListener("click", async () => {
+  if (!activeCodingJob) return;
+  try {
+    await api("/coding/jobs/" + activeCodingJob + "/cancel", {method: "POST"});
+    $("#coding-status").textContent = "취소 요청됨…";
+  } catch (e) {
+    $("#coding-status").textContent = e.message;
+    $("#coding-status").className = "status-line err";
+  }
+});
+let activeCodingJob = null;
+function renderCodingJob(j) {
+  const stepsHtml = (j.steps || []).length ? `
+    <div class="card"><h3 style="margin:0 0 10px;font-size:14px">에이전트 스텝 (${j.steps.length})</h3>
+      ${j.steps.map(s => `
+        <div style="border-left:2px solid var(--accent);padding:6px 10px;margin:6px 0">
+          <div class="card-meta mono">#${s.step} ${esc(s.tool)}(${esc(JSON.stringify(s.args))})</div>
+          ${s.thought ? `<div class="card-meta">${esc(s.thought)}</div>` : ""}
+          <pre class="block" style="white-space:pre-wrap;font-size:12px">${esc(s.result || "")}</pre>
+        </div>`).join("")}
+    </div>` : "";
+  $("#coding-result").innerHTML = `
+    ${stepsHtml}
+    <div class="card"><h3 style="margin:0 0 10px;font-size:14px">출력</h3>
+      <pre class="block" style="white-space:pre-wrap">${esc(j.answer || j.text || "(출력 없음)")}</pre></div>
+    ${j.diff ? `<div class="card"><h3 style="margin:0 0 10px;font-size:14px">Diff</h3>
+      <pre class="block">${esc(j.diff)}</pre>
+      <div class="card-meta">workspace: ${esc(j.workspace || "")}</div></div>` : ""}`;
+}
+async function loadCodingJobs() {
+  const el = $("#coding-jobs");
+  try {
+    const d = await api("/coding/jobs?limit=10");
+    const jobs = d.jobs || [];
+    el.innerHTML = jobs.length ? jobs.map(j => `
+      <div class="card" data-job="${esc(j.id)}" style="cursor:pointer;margin-bottom:8px">
+        <div class="card-top">${badge(j.status)}
+          <span class="card-meta mono">${esc(j.engine || "")}/${esc(j.tool || "")}${j.model ? " · " + esc(j.model) : ""}</span></div>
+        <div style="font-size:13px;margin-top:4px">${esc((j.task || "").slice(0, 120))}</div>
+        <div class="card-meta">${esc((j.created_at || "").replace("T", " ").slice(0, 19))}</div>
+      </div>`).join("") : '<div class="empty">작업 없음</div>';
+    el.querySelectorAll("[data-job]").forEach(node =>
+      node.addEventListener("click", async () => {
+        const j = await api("/coding/jobs/" + node.dataset.job);
+        $("#coding-status").textContent =
+          `불러옴 (${j.engine}/${j.tool}, ${j.status})`;
+        $("#coding-status").className = "status-line";
+        renderCodingJob(j);
+      }));
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function handleCodingJob(j) {
+  const st = $("#coding-status");
+  if (j.status === "queued") {
+    st.textContent = "대기 중…"; st.className = "status-line";
+    $("#coding-cancel").hidden = false;
+    return false;
+  }
+  if (j.status === "running") {
+    const n = (j.steps || []).length;
+    st.textContent = `${j.tool} 실행 중…${n ? ` (스텝 ${n})` : ""}`;
+    st.className = "status-line";
+    if (n) renderCodingJob(j);  // 진행 중 스텝 미리보기
+    return false;
+  }
+  $("#coding-cancel").hidden = true;
+  activeCodingJob = null;
+  loadCodingJobs();
+  if (j.status === "cancelled") {
+    st.textContent = "취소됨"; st.className = "status-line";
+  } else if (j.status === "failed") {
+    st.textContent = "실패: " + (j.error || ""); st.className = "status-line err";
+    renderCodingJob(j);
+    return true;
+  } else {
+    st.textContent = `완료 (${j.tool}${j.model ? "/" + j.model : ""}${j.exit_code != null ? ", exit=" + j.exit_code : ""}, 시도 ${j.attempts || 1}회)`;
+    st.className = "status-line";
+  }
+  renderCodingJob(j);
+  return true;
+}
+async function streamCodingJob(jobId) {
+  // SSE 우선, 실패 시 폴링 폴백
+  try {
+    const resp = await fetch(API + "/coding/jobs/" + jobId + "/events",
+      {headers: apiHeaders()});
+    if (!resp.ok || !resp.body) throw new Error("no stream");
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const j = JSON.parse(line.slice(6));
+          if (handleCodingJob(j)) return;
+        }
+      }
+    }
+    // 스트림 종료 — 최종 상태 한 번 더 확인
+    handleCodingJob(await api("/coding/jobs/" + jobId));
+    return;
+  } catch (e) { /* 폴백으로 진행 */ }
+  pollCodingJobFallback(jobId);
+}
+function pollCodingJobFallback(jobId) {
   clearInterval(codingPoll);
   codingPoll = setInterval(async () => {
     try {
       const j = await api("/coding/jobs/" + jobId);
-      const st = $("#coding-status");
-      if (j.status === "running") {
-        st.textContent = `${j.tool} 실행 중…`; return;
-      }
-      clearInterval(codingPoll);
-      if (j.status === "failed") {
-        st.textContent = "실패: " + j.error;
-        st.className = "status-line err";
-        return;
-      }
-      const stepsHtml = (j.steps || []).length ? `
-        <div class="card"><h3 style="margin:0 0 10px;font-size:14px">에이전트 스텝 (${j.steps.length})</h3>
-          ${j.steps.map(s => `
-            <div style="border-left:2px solid var(--accent);padding:6px 10px;margin:6px 0">
-              <div class="card-meta mono">#${s.step} ${esc(s.tool)}(${esc(JSON.stringify(s.args))})</div>
-              ${s.thought ? `<div class="card-meta">${esc(s.thought)}</div>` : ""}
-              <pre class="block" style="white-space:pre-wrap;font-size:12px">${esc(s.result || "")}</pre>
-            </div>`).join("")}
-        </div>` : "";
-      st.textContent = `완료 (${j.tool}${j.model ? "/" + j.model : ""}${j.exit_code != null ? ", exit=" + j.exit_code : ""})`;
-      st.className = "status-line";
-      $("#coding-result").innerHTML = `
-        ${stepsHtml}
-        <div class="card"><h3 style="margin:0 0 10px;font-size:14px">출력</h3>
-          <pre class="block" style="white-space:pre-wrap">${esc(j.answer || j.text || "(출력 없음)")}</pre></div>
-        ${j.diff ? `<div class="card"><h3 style="margin:0 0 10px;font-size:14px">Diff</h3>
-          <pre class="block">${esc(j.diff)}</pre>
-          <div class="card-meta">workspace: ${esc(j.workspace || "")}</div></div>` : ""}`;
+      if (handleCodingJob(j)) clearInterval(codingPoll);
     } catch (e) {
       clearInterval(codingPoll);
+      $("#coding-cancel").hidden = true;
+      activeCodingJob = null;
       $("#coding-status").textContent = e.message;
       $("#coding-status").className = "status-line err";
     }
   }, 2000);
+}
+function pollCodingJob(jobId) {
+  activeCodingJob = jobId;
+  streamCodingJob(jobId);
 }
 
 /* ── Calendar ── */

@@ -199,6 +199,68 @@ def test_coding_run_agent_engine():
     assert "agent_out.txt" in job["diff"]
 
 
+def test_coding_job_persistence_and_cancel():
+    """job이 DB에 영속화되고(재오픈 후 조회 가능), 취소 엔드포인트가 동작한다."""
+    import time
+
+    from jobmate.store.db import Store
+
+    db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
+    settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
+    store = Store(db)
+    llm = scripted_llm({"AgentAction": {"action": "final", "answer": "done"}})
+    client = TestClient(create_app(settings=settings, store=store, llm=llm))
+
+    r = client.post("/api/v1/coding/run", json={"engine": "agent", "task": "t"})
+    job_id = r.json()["job_id"]
+    for _ in range(100):
+        job = client.get(f"/api/v1/coding/jobs/{job_id}").json()
+        if job["status"] != "running":
+            break
+        time.sleep(0.1)
+    assert job["status"] == "done"
+
+    # 새 Store(=재시작과 동일)에서도 job 조회 가능
+    store2 = Store(db)
+    persisted = store2.get_coding_job(job_id)
+    assert persisted is not None
+    assert persisted["status"] == "done"
+    assert persisted["answer"] == "done"
+
+    # 목록 엔드포인트
+    jobs = client.get("/api/v1/coding/jobs").json()["jobs"]
+    assert any(j["id"] == job_id for j in jobs)
+
+    # 취소: queued job은 즉시 cancelled, running job은 cancel_requested 플래그
+    store2.create_coding_job("cancelme", engine="agent", tool="agent", model="", task="x")
+    r = client.post("/api/v1/coding/jobs/cancelme/cancel")
+    assert r.json() == {"ok": True, "status": "cancelled"}
+    assert store2.get_coding_job("cancelme")["status"] == "cancelled"
+
+    store2.create_coding_job("runningme", engine="agent", tool="agent", model="", task="x")
+    store2.claim_coding_job("runningme", "test-owner")
+    r = client.post("/api/v1/coding/jobs/runningme/cancel")
+    assert r.json() == {"ok": True, "status": "cancel_requested"}
+    assert store2.coding_job_cancel_requested("runningme")
+
+    store2.update_coding_job("runningme", status="done")
+    r = client.post("/api/v1/coding/jobs/runningme/cancel")
+    assert r.json()["ok"] is False
+    r = client.post("/api/v1/coding/jobs/nonexistent/cancel")
+    assert r.status_code == 404
+
+    # SSE 이벤트 스트림 — 종료된 job은 즉시 data 1회 후 종료
+    store2.update_coding_job("runningme", status="done", answer="fin")
+    with client.stream("GET", "/api/v1/coding/jobs/runningme/events") as resp:
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        body = resp.read().decode()
+    assert "data: " in body and '"status": "done"' in body
+    r = client.get("/api/v1/coding/jobs/nonexistent/events")
+    assert r.status_code == 404
+    store2.close()
+
+
 def test_settings_prefs_roundtrip():
     client, store = _client()
     r = client.get("/api/v1/settings")

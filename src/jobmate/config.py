@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     coding_model: str = ""  # 비우면 각 CLI 기본 모델
     coding_workspace: str = ""  # 비우면 data/workspaces/<run_id>에 git repo 생성
     coding_timeout_seconds: float = 600.0
+    # 코딩 job 샌드박스: none|seatbelt(macOS sandbox-exec)|docker
+    coding_sandbox: str = "none"
+    coding_sandbox_image: str = "python:3.12-slim"
 
     # LangSmith 관측성 — API 키가 있으면 LangGraph/LangSmith 트레이싱 활성화
     langsmith_tracing: bool = True

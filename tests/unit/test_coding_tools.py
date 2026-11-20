@@ -78,3 +78,15 @@ def test_run_missing_binary(tmp_path):
 
     with pytest.raises(CodingToolError):
         NoBin().run(prompt="x", cwd=str(tmp_path), timeout=1)
+
+
+def test_run_cmd_cancel_kills_process(tmp_path):
+    """cancel_check가 True면 실행 중인 프로세스를 kill하고 -15를 반환한다."""
+    code, out = _run_cmd(["sleep", "30"], str(tmp_path), timeout=60, cancel_check=lambda: True)
+    assert code == -15
+    assert "cancelled" in out
+
+
+def test_run_cmd_timeout(tmp_path):
+    with pytest.raises(CodingToolError, match="timed out"):
+        _run_cmd(["sleep", "30"], str(tmp_path), timeout=1)

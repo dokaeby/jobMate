@@ -142,6 +142,19 @@ def test_agent_llm_failure(tmp_path: Path):
     assert "llm error" in res["error"]
 
 
+def test_agent_cancel_check(tmp_path: Path):
+    calls = {"n": 0}
+
+    def cancel_check() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    llm = _agent_llm([{"action": "tool", "tool": "ls", "args": {"path": "."}}])
+    res = CodingAgent(llm, _settings(tmp_path)).run("t", str(tmp_path), cancel_check=cancel_check)
+    assert res["status"] == "cancelled"
+    assert "cancelled" in res["error"]
+
+
 def test_agent_unknown_tool_recorded(tmp_path: Path):
     llm = _agent_llm(
         [
