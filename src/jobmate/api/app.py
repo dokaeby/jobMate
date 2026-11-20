@@ -682,6 +682,14 @@ def create_app(
             c["url"] = f"https://mail.google.com/mail/u/0/#all/{c['source_id']}"
         return {"cards": cards}
 
+    @app.post("/api/v1/email/purge-undecryptable")
+    def purge_undecryptable(request: Request) -> JSONResponse:
+        """복호화 불가한 email_summaries 행 삭제 (키 로테이션 복구용)."""
+        removed = store.purge_undecryptable_email_summaries("gmail")
+        logger.info("purged %d undecryptable email_summaries rows", removed)
+        store.audit("", "api", "email_purge_undecryptable", "", {"removed": removed})
+        return JSONResponse(content={"ok": True, "removed": removed})
+
     # ---------- settings (대시보드 설정) ----------
     PREFS_KEY = "prefs"
 

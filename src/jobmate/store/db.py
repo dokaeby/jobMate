@@ -1537,6 +1537,34 @@ class Store:
             out.append(d)
         return out
 
+    def purge_undecryptable_email_summaries(self, provider: str = "gmail") -> int:
+        """복호화되지 않는(enc:v1: 접두사가 복호화 후에도 남는) 행 삭제.
+        암호화 키 로테이션 등으로 읽을 수 없게 된 행을 정리할 때 사용."""
+        from ..security import PREFIX, decrypt_str
+
+        rows = self._conn.execute(
+            "SELECT source_provider, source_id, subject, sender, summary"
+            " FROM email_summaries WHERE source_provider=?",
+            (provider,),
+        ).fetchall()
+        bad = [
+            (r["source_provider"], r["source_id"])
+            for r in rows
+            if any(
+                decrypt_str(r.get(k, "")).startswith(PREFIX)
+                for k in ("subject", "sender", "summary")
+            )
+        ]
+        if not bad:
+            return 0
+        with self.tx() as c:
+            for prov, sid in bad:
+                c.execute(
+                    "DELETE FROM email_summaries WHERE source_provider=? AND source_id=?",
+                    (prov, sid),
+                )
+        return len(bad)
+
     # ---- coding_jobs (코딩 에이전트/CLI 영속 job) ----
     _CODING_JOB_FIELDS = (
         "engine",
