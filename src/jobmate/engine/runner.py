@@ -398,10 +398,10 @@ class WorkflowRunner:
             os.makedirs(ws, exist_ok=True)
             subprocess.run(["git", "init", "-q"], cwd=ws, check=True)  # noqa: S603,S607
             subprocess.run(  # noqa: S603
-                [
+                [  # noqa: S607
                     "git",
                     "-c",
-                    "user.email=jobmate@local",  # noqa: S607
+                    "user.email=jobmate@local",
                     "-c",
                     "user.name=jobmate",
                     "commit",

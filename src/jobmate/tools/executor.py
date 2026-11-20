@@ -35,10 +35,10 @@ class ToolExecutor:
                 return f.read()[: ToolExecutor.MAX_RESULT_CHARS]
 
         def run_tests(command: str = "pytest -q") -> dict[str, Any]:
-            proc = subprocess.run(
+            proc = subprocess.run(  # noqa: S603
                 command.split(),
                 cwd=root,
-                capture_output=True,  # noqa: S603
+                capture_output=True,
                 text=True,
                 timeout=300,
             )

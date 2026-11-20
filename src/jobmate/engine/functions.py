@@ -66,10 +66,10 @@ def auto_checks(ctx: FunctionContext) -> dict[str, Any]:
 
     for cmd in ctx.settings.check_commands:
         try:
-            proc = subprocess.run(
+            proc = subprocess.run(  # noqa: S603
                 cmd.split(),
                 capture_output=True,
-                text=True,  # noqa: S603
+                text=True,
                 timeout=120,
                 cwd=Path.cwd(),
             )
