@@ -109,6 +109,21 @@ class Settings(BaseSettings):
         )
 
 
+def configure_logging(settings: Settings) -> None:
+    """mode별 로깅 레벨. debug=DEBUG, release=INFO (DEBUG 출력 숨김).
+    토큰/비밀값은 어느 레벨에서도 로깅하지 않는다(호출부 책임)."""
+    import logging
+
+    level = logging.DEBUG if settings.mode == "debug" else logging.INFO
+    logger = logging.getLogger("jobmate")
+    logger.setLevel(level)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    logger.propagate = False
+
+
 def configure_langsmith(settings: Settings) -> bool:
     """LangSmith 트레이싱 env를 설정. API 키가 없거나 tracing=False면 False."""
     if not settings.langsmith_tracing:

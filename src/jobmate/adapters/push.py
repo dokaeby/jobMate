@@ -11,6 +11,13 @@ from pywebpush import WebPushException, webpush
 logger = logging.getLogger("jobmate.adapters.push")
 
 
+def _fingerprint(endpoint: str) -> str:
+    """로그용 비식별 지문 — endpoint 원문 대신 SHA256 앞 12자."""
+    import hashlib
+
+    return hashlib.sha256(endpoint.encode()).hexdigest()[:12]
+
+
 class WebPushNotifier:
     """Notifier 프로토콜 — push_subscriptions 전체로 Web Push 발송.
 
@@ -47,8 +54,18 @@ class WebPushNotifier:
                 status = getattr(e.response, "status_code", None)
                 if status in (404, 410):
                     stale.append(sub["endpoint"])
-                logger.warning("webpush failed: %s (%s)", sub["endpoint"][:60], e)
+                # endpoint는 push 발송 capability라 로그에 남기지 않고 지문만 기록
+                logger.warning(
+                    "webpush failed: sub=%s status=%s err=%s",
+                    _fingerprint(sub["endpoint"]),
+                    status,
+                    str(e)[:120],
+                )
             except Exception as e:
-                logger.warning("webpush error: %s (%s)", sub["endpoint"][:60], e)
+                logger.warning(
+                    "webpush error: sub=%s err=%s",
+                    _fingerprint(sub["endpoint"]),
+                    str(e)[:120],
+                )
         for endpoint in stale:
             self._store.delete_push_subscription(endpoint)

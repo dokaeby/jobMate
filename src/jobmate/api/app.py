@@ -23,12 +23,20 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..adapters import LoggingNotifier, WebPushNotifier
-from ..config import Settings, configure_langsmith, database_dsn, get_settings
+from ..config import (
+    Settings,
+    configure_langsmith,
+    configure_logging,
+    database_dsn,
+    get_settings,
+)
 from ..llm import CompositeLLM
 from ..models import RunStatus
 from ..radar import GitHubAPI
 from ..sensors import (
     allowed_identifier,
+    build_gmail_url,
+    is_safe_source_url,
     verify_slack_signature,
     verify_telegram_secret,
 )
@@ -77,6 +85,7 @@ def create_app(
     adapters: dict[str, Any] | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    configure_logging(settings)
     configure_langsmith(settings)
     store = store or Store(database_dsn(settings))
     llm = llm or CompositeLLM()
@@ -561,7 +570,12 @@ def create_app(
         ws = Path(settings.db_path).parent / "workspaces" / f"coding-{job_id}"
         if not (ws / ".git").exists():
             ws.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["git", "init", "-q"], cwd=ws, check=True)  # noqa: S603,S607
+            subprocess.run(  # noqa: S603
+                ["git", "init", "-q"],  # noqa: S607
+                cwd=ws,
+                check=True,
+                timeout=30,
+            )
             subprocess.run(  # noqa: S603
                 [  # noqa: S607
                     "git",
@@ -577,6 +591,7 @@ def create_app(
                 ],
                 cwd=ws,
                 check=True,
+                timeout=30,
             )
         return str(ws)
 
@@ -900,11 +915,19 @@ def _process_due_notification_jobs(store: Store, adapters: dict[str, Any]) -> No
             # MVP: 본문은 스케줄 이벤트 제목으로 구성
             ev_rows = store.list_scheduled_events(limit=200)
             title = "일정 알림"
+            source_url = ""
             for ev in ev_rows:
                 if f"{ev['source_provider']}:{ev['source_id']}" == job["scheduled_event_id"]:
                     title = f"곧 시작: {ev['title']}"
+                    # gmail 유래 이벤트는 원본 메일 링크를 푸시에 포함
+                    if ev["source_provider"] == "gmail" and ev["source_id"]:
+                        try:
+                            url = build_gmail_url(ev["source_id"])
+                            source_url = url if is_safe_source_url(url) else ""
+                        except ValueError:
+                            pass
                     break
-            notifier.send(title=title, body="", source_url="")
+            notifier.send(title=title, body="", source_url=source_url)
             store.mark_job(job["id"], "delivered")
         except Exception as e:
             store.mark_job(job["id"], "failed", str(e)[:200])

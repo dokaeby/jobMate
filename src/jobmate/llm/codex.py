@@ -77,6 +77,7 @@ class CodexAuth:
             tokens["refresh_token"] = new["refresh_token"]
         data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._path.write_text(json.dumps(data))
+        self._path.chmod(0o600)
 
     def headers(self) -> dict[str, str]:
         data = self._load()

@@ -396,7 +396,12 @@ class WorkflowRunner:
         )
         if not os.path.exists(os.path.join(ws, ".git")):
             os.makedirs(ws, exist_ok=True)
-            subprocess.run(["git", "init", "-q"], cwd=ws, check=True)  # noqa: S603,S607
+            subprocess.run(  # noqa: S603
+                ["git", "init", "-q"],  # noqa: S607
+                cwd=ws,
+                check=True,
+                timeout=30,
+            )
             subprocess.run(  # noqa: S603
                 [  # noqa: S607
                     "git",
@@ -412,6 +417,7 @@ class WorkflowRunner:
                 ],
                 cwd=ws,
                 check=True,
+                timeout=30,
             )
         return ws
 
