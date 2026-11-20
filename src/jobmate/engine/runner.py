@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
@@ -26,6 +27,9 @@ from ..store.db import Store
 from .functions import FUNCTIONS, FunctionContext
 from .schemas import SCHEMAS
 from .state import HarnessState, initial_state
+
+if TYPE_CHECKING:
+    from ..config import Settings
 
 logger = logging.getLogger("jobmate.engine")
 
@@ -528,3 +532,27 @@ def build_checkpointer(db_path: str) -> SqliteSaver:
     saver = ctx.__enter__()
     saver._ctx = ctx  # type: ignore[attr-defined]
     return saver
+
+
+def build_checkpointer_for(settings: Settings) -> Any:
+    """Postgres DSN이 있으면 PostgresSaver, 아니면 SQLite.
+
+    서버리스(Vercel)에서는 /tmp가 인스턴스별로 분리되어 SQLite 체크포인트가
+    invoke 인스턴스와 resume 인스턴스 사이에서 유실된다. DB가 Postgres면
+    checkpoint도 같은 DB에 두어 어느 인스턴스든 interrupt를 재개할 수 있게 한다.
+    """
+    dsn = (
+        settings.database_url
+        or os.environ.get("POSTGRES_URL", "")
+        or os.environ.get("POSTGRES_PRISMA_URL", "")
+    )
+    if dsn:
+        import psycopg
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+
+        conn = psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
+        saver = PostgresSaver(conn)
+        saver.setup()  # checkpoint 테이블 생성 (idempotent)
+        return saver
+    return build_checkpointer(str(settings.db_path) + ".checkpoints")

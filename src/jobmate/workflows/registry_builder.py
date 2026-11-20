@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..config import Settings
 from ..engine.registry import Registry, default_agents
-from ..engine.runner import WorkflowRunner, build_checkpointer
+from ..engine.runner import WorkflowRunner, build_checkpointer_for
 from ..llm import LLMClient
 from ..store.db import Store
 from . import WORKFLOWS
@@ -47,7 +47,7 @@ def build_runner(
 
     reg = build_registry(settings)
     spec = reg.workflow(workflow_key)
-    cp = build_checkpointer(str(settings.db_path) + ".checkpoints")
+    cp = build_checkpointer_for(settings)
     coding_tool = coding
     if coding_tool is None and settings.coding_tool != "none":
         coding_tool = build_coding_tool(settings.coding_tool, model=settings.coding_model or None)
