@@ -103,6 +103,27 @@ def create_app(
         store.close()
 
     app = FastAPI(title="jobMate Harness", version="0.1.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def security_middleware(request: Request, call_next: Any) -> Any:
+        from ..security import authorized
+
+        path = request.url.path
+        # API 키 인증: /api/* 전체. health 체크와 외부 webhook(자체 서명 검증)은 제외
+        if path.startswith("/api/") and not path.startswith(
+            ("/api/v1/health", "/api/v1/webhooks/")
+        ):
+            if not authorized(request):
+                return err(401, "unauthorized", "invalid or missing API key", request)
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+        )
+        return response
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def err(status: int, code: str, message: str, request: Request) -> JSONResponse:

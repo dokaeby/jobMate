@@ -1313,12 +1313,14 @@ class Store:
 
     # ---- push_subscriptions ----
     def save_push_subscription(self, endpoint: str, keys: dict[str, Any]) -> None:
+        from ..security import encrypt_str
+
         with self.tx() as c:
             c.execute(
                 "INSERT INTO push_subscriptions(endpoint,keys_json,created_at)"
                 " VALUES(?,?,?) ON CONFLICT(endpoint) DO UPDATE SET"
                 " keys_json=excluded.keys_json",
-                (endpoint, json.dumps(keys), _iso(_now())),
+                (endpoint, encrypt_str(json.dumps(keys)), _iso(_now())),
             )
 
     def delete_push_subscription(self, endpoint: str) -> None:
@@ -1326,8 +1328,12 @@ class Store:
             c.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
 
     def list_push_subscriptions(self) -> list[dict[str, Any]]:
+        from ..security import decrypt_str
+
         rows = self._conn.execute("SELECT * FROM push_subscriptions").fetchall()
-        return [{"endpoint": r["endpoint"], "keys": _loads(r["keys_json"])} for r in rows]
+        return [
+            {"endpoint": r["endpoint"], "keys": _loads(decrypt_str(r["keys_json"]))} for r in rows
+        ]
 
     # ---- email_summaries (3줄 요약 카드) ----
     def save_email_summary(
@@ -1340,6 +1346,8 @@ class Store:
         summary: str,
         message_at: str = "",
     ) -> None:
+        from ..security import encrypt_str
+
         with self.tx() as c:
             c.execute(
                 "INSERT INTO email_summaries(source_provider,source_id,"
@@ -1349,15 +1357,31 @@ class Store:
                 " subject=excluded.subject, sender=excluded.sender,"
                 " summary=excluded.summary, message_at=excluded.message_at,"
                 " checked_at=excluded.checked_at",
-                (provider, source_id, subject, sender, summary, message_at, _iso(_now())),
+                (
+                    provider,
+                    source_id,
+                    encrypt_str(subject),
+                    encrypt_str(sender),
+                    encrypt_str(summary),
+                    message_at,
+                    _iso(_now()),
+                ),
             )
 
     def list_email_summaries(
         self, provider: str = "gmail", limit: int = 30
     ) -> list[dict[str, Any]]:
+        from ..security import decrypt_str
+
         rows = self._conn.execute(
             "SELECT * FROM email_summaries WHERE source_provider=?"
             " ORDER BY checked_at DESC LIMIT ?",
             (provider, limit),
         ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("subject", "sender", "summary"):
+                d[k] = decrypt_str(d.get(k, ""))
+            out.append(d)
+        return out

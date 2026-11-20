@@ -298,8 +298,19 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-async function api(path, opts) {
-  const r = await fetch(API + path, opts);
+async function api(path, opts, _retried) {
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers);
+  const key = localStorage.getItem("jobmate_api_key") || "";
+  if (key) headers["X-API-Key"] = key;
+  const r = await fetch(API + path, Object.assign({}, opts, {headers}));
+  if (r.status === 401 && !_retried) {
+    const k = prompt("API 키를 입력하세요 (서버 JOBMATE_API_KEY)");
+    if (k) {
+      localStorage.setItem("jobmate_api_key", k.trim());
+      return api(path, opts, true);
+    }
+  }
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j.error ? j.error.message : r.statusText);
