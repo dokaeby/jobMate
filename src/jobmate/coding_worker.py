@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import subprocess
@@ -27,6 +28,8 @@ from .tools.coding import CodingToolError, build_coding_tool, workspace_diff
 LEASE_SECONDS = 30
 RETRY_BASE_SECONDS = 5
 RETRY_MAX_SECONDS = 300
+
+logger = logging.getLogger("jobmate.coding_worker")
 
 
 class CodingJobWorker:
@@ -90,10 +93,14 @@ class CodingJobWorker:
             if self._claim(job["id"]):
                 self._spawn(job["id"])
                 n += 1
+        orphans = 0
         for job in self._store.list_orphaned_coding_jobs(limit=10):
             if self._claim(job["id"]):
                 self._spawn(job["id"])
-                n += 1
+                orphans += 1
+        n += orphans
+        if orphans:
+            logger.info("recovered %d orphaned coding jobs", orphans)
         return n
 
     def _dispatch_loop(self) -> None:
@@ -102,9 +109,7 @@ class CodingJobWorker:
                 self.dispatch_once()
             except Exception:
                 # 디스패처 루프는 죽지 않는다 — 다음 주기에 재시도
-                import logging
-
-                logging.getLogger("jobmate.coding_worker").exception("dispatch_once failed")
+                logger.exception("dispatch_once failed")
 
     def _claim(self, job_id: str) -> bool:
         return self._store.claim_coding_job(job_id, self._owner, self._lease_seconds)
@@ -149,11 +154,7 @@ class CodingJobWorker:
             return job_id in self._lease_lost
 
     def _lease_lost_log(self, job_id: str) -> None:
-        import logging
-
-        logging.getLogger("jobmate.coding_worker").warning(
-            "coding job %s: lease lost — fenced write skipped", job_id
-        )
+        logger.warning("coding job %s: lease lost — fenced write skipped", job_id)
 
     # ---- execution ----
     def _workspace(self, job_id: str, custom: str) -> str:
@@ -193,9 +194,11 @@ class CodingJobWorker:
         return str(ws)
 
     def _sandbox_wrap(self, cwd: str) -> Callable[[list[str]], list[str]] | None:
+        mode = self._settings.coding_sandbox
+        logger.debug("coding sandbox mode=%s cwd=%s", mode, cwd)
         return make_wrapper(
             cwd,
-            self._settings.coding_sandbox,
+            mode,
             self._settings.coding_sandbox_image,
         )
 
@@ -203,6 +206,13 @@ class CodingJobWorker:
         job = self._store.get_coding_job(job_id)
         if job is None or job.get("status") != "running":
             return
+        logger.info(
+            "coding job %s start engine=%s tool=%s attempt=%s",
+            job_id,
+            job.get("engine") or "cli",
+            job.get("tool") or "",
+            job.get("attempts") or 1,
+        )
         cancel_check = lambda: (  # noqa: E731
             self._store.coding_job_cancel_requested(job_id) or self._lost(job_id)
         )
@@ -256,6 +266,7 @@ class CodingJobWorker:
             if not self._store.update_coding_job(job_id, owner=self._owner, **fields):
                 self._lease_lost_log(job_id)
                 return
+        logger.info("coding job %s finished status=%s steps=%s", job_id, status, len(res["steps"]))
         self._store.audit(
             "",
             "tool:agent",
@@ -302,6 +313,13 @@ class CodingJobWorker:
             if not self._store.update_coding_job(job_id, owner=self._owner, **fields):
                 self._lease_lost_log(job_id)
                 return
+        logger.info(
+            "coding job %s finished status=%s tool=%s exit=%s",
+            job_id,
+            status,
+            res.tool,
+            res.exit_code,
+        )
         self._store.audit(
             "",
             f"tool:{res.tool}",
@@ -324,6 +342,8 @@ class CodingJobWorker:
             )
             if not wrote:
                 self._lease_lost_log(job_id)
+            else:
+                logger.info("coding job %s cancelled", job_id)
             return
         self._retry_or_fail(job_id, error)
 
@@ -337,9 +357,7 @@ class CodingJobWorker:
         if final == "lost":
             self._lease_lost_log(job_id)
             return
-        import logging
-
-        logging.getLogger("jobmate.coding_worker").warning(
+        logger.warning(
             "coding job %s attempt %s failed → %s (next in %ss): %s",
             job_id,
             attempts,

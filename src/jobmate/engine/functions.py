@@ -193,6 +193,25 @@ def gmail_validate(ctx: FunctionContext) -> dict[str, Any]:
     except Exception as e:
         return {"status": "invalid", "reason": str(e)[:200]}
     ok, reason = validate_event(ev)
+    if not ok:
+        # 검토 큐(scheduled_events)에 needs_review로 남겨 사람이 승인/수정할 수 있게 한다
+        provider, source_id, _, thread, _ = _src(ctx)
+        ctx.store.save_scheduled_event(
+            event_id=f"{provider}:{source_id}",
+            source_provider=provider,
+            source_id=source_id,
+            thread_id=thread,
+            title=ev.title,
+            start_at=ev.start_at,
+            end_at=ev.end_at,
+            timezone=ev.timezone,
+            location=ev.location,
+            summary=ev.summary,
+            status="needs_review",
+            confidence=ev.confidence,
+            reason=reason,
+            source_refs=source_id,
+        )
     return {
         "status": "validated" if ok else "needs_review",
         "reason": reason,

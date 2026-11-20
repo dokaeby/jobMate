@@ -78,20 +78,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "coding-worker":
+        import logging
         import signal
         import threading
 
         from .coding_worker import CodingJobWorker
 
+        log = logging.getLogger("jobmate.cli")
         worker = CodingJobWorker(store, settings, llm)
         worker.start()
-        print(f"coding-worker started (owner={worker.owner})", flush=True)
+        log.info("coding-worker started owner=%s", worker.owner)
         stop = threading.Event()
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: stop.set())
         stop.wait()
         worker.stop()
-        print("coding-worker stopped", flush=True)
+        log.info("coding-worker stopped")
         return 0
 
     if args.cmd == "google-auth":

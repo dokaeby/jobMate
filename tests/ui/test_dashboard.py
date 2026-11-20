@@ -59,7 +59,24 @@ def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamesp
     )
     store = Store(str(settings.db_path))
     llm = FakeLLM(_ui_llm_handler)
-    app = create_app(settings=settings, store=store, llm=llm, adapters={})
+
+    class _FakeCalendar:
+        def __init__(self) -> None:
+            self.created: list[dict[str, Any]] = []
+
+        def find_by_marker(self, marker: str) -> str | None:
+            return None
+
+        def create_event(self, **kwargs: Any) -> str:
+            self.created.append(kwargs)
+            return "ui-cal-1"
+
+    app = create_app(
+        settings=settings,
+        store=store,
+        llm=llm,
+        adapters={"calendar": _FakeCalendar()},
+    )
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -268,3 +285,63 @@ def test_coding_recent_jobs_click_loads_result(ui_server: SimpleNamespace, page:
     _wait_text(page, "#coding-result", "저장된 답변")
     _wait_text(page, "#coding-result", "에이전트 스텝")
     _wait_text(page, "#coding-result", "diff --git")
+
+
+def _seed_review_event(store: Store, event_id: str) -> None:
+    store.save_scheduled_event(
+        event_id=event_id,
+        source_provider="gmail",
+        source_id=event_id.split(":", 1)[-1],
+        title="UI 검토회의",
+        start_at="not-a-date",
+        end_at="2025-01-10T11:00:00+09:00",
+        timezone="Asia/Seoul",
+        status="needs_review",
+        confidence=0.3,
+        reason="bad_datetime",
+    )
+
+
+def test_calendar_review_reject(page: Page, ui_server: SimpleNamespace) -> None:
+    """검토 필요 카드 표시 → 거부 시 rejected 전이 후 카드 제거."""
+    _seed_review_event(ui_server.store, "ui:rev-reject")
+    page.click('.nav-item[data-view="calendar"]')
+    card = page.locator('[data-review="ui:rev-reject"]')
+    card.wait_for(timeout=5000)
+    assert "검토 필요" in page.locator("#calendar-review h3").inner_text()
+    assert card.locator(".rv-title").input_value() == "UI 검토회의"
+    card.locator(".rv-reject").click()
+    _wait_text(page, '[data-review="ui:rev-reject"] .rv-msg', "거부됨")
+    page.wait_for_selector('[data-review="ui:rev-reject"]', state="detached", timeout=5000)
+    assert ui_server.store.get_scheduled_event("ui:rev-reject")["status"] == "rejected"
+
+
+def test_calendar_review_approve_with_edit(page: Page, ui_server: SimpleNamespace) -> None:
+    """수정값으로 승인 → 캘린더 등록 → registered 카드로 이동."""
+    _seed_review_event(ui_server.store, "ui:rev-approve")
+    page.click('.nav-item[data-view="calendar"]')
+    card = page.locator('[data-review="ui:rev-approve"]')
+    card.wait_for(timeout=5000)
+    card.locator(".rv-start").fill("2025-01-10T10:00:00+09:00")
+    card.locator(".rv-end").fill("2025-01-10T11:00:00+09:00")
+    card.locator(".rv-approve").click()
+    _wait_text(page, '[data-review="ui:rev-approve"] .rv-msg', "등록됨")
+    page.wait_for_selector('[data-review="ui:rev-approve"]', state="detached", timeout=5000)
+    ev = ui_server.store.get_scheduled_event("ui:rev-approve")
+    assert ev["status"] == "registered"
+    assert ev["calendar_event_id"] == "ui-cal-1"
+
+
+def test_calendar_review_invalid_edit_rejected(page: Page, ui_server: SimpleNamespace) -> None:
+    """수정값이 여전히 무효하면 등록 거부 + needs_review 유지."""
+    _seed_review_event(ui_server.store, "ui:rev-invalid")
+    page.click('.nav-item[data-view="calendar"]')
+    card = page.locator('[data-review="ui:rev-invalid"]')
+    card.wait_for(timeout=5000)
+    card.locator(".rv-start").fill("2025-01-10T12:00:00+09:00")
+    card.locator(".rv-end").fill("2025-01-10T10:00:00+09:00")  # 종료 < 시작
+    card.locator(".rv-approve").click()
+    _wait_text(page, '[data-review="ui:rev-invalid"] .rv-msg', "invalid")
+    ev = ui_server.store.get_scheduled_event("ui:rev-invalid")
+    assert ev["status"] == "needs_review"
+    assert ev["calendar_event_id"] in (None, "")

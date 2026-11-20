@@ -63,10 +63,12 @@ class _GoogleAuth:
             },
         )
         if r.status_code != 200:
+            logger.warning("google token refresh failed: status=%s", r.status_code)
             raise GoogleAuthError(f"token refresh failed: {r.status_code} {r.text[:200]}")
         body = r.json()
         self._access_token = body["access_token"]
         self._expires_at = time.time() + float(body.get("expires_in", 3600))
+        logger.debug("google access token refreshed, expires_in=%ss", body.get("expires_in"))
 
     def headers(self) -> dict[str, str]:
         if not self._access_token or time.time() >= self._expires_at - 60:

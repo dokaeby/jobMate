@@ -99,3 +99,43 @@ class CronJobOrgClient:
         if r.status_code != 200:
             raise CronJobOrgError(f"cron-job.org GET failed: {r.status_code} {r.text[:200]}")
         return r.json()
+
+
+def create_job(
+    api_key: str,
+    *,
+    base_url: str = DEFAULT_BASE_URL,
+    title: str,
+    url: str,
+    schedule: dict[str, Any],
+    method: str = "POST",
+    headers: dict[str, str] | None = None,
+    body: str = "",
+    client: httpx.Client | None = None,
+) -> int:
+    """PUT /jobs — 새 cron job 생성. 반환: jobId."""
+    if not api_key:
+        raise CronJobOrgError("api_key required")
+    method_code = {"GET": 0, "POST": 1, "PUT": 2, "PATCH": 3, "DELETE": 4}.get(method.upper())
+    if method_code is None:
+        raise CronJobOrgError(f"unsupported method: {method}")
+    job: dict[str, Any] = {
+        "title": title,
+        "url": url,
+        "enabled": True,
+        "saveResponses": True,
+        "requestMethod": method_code,
+        "schedule": schedule,
+    }
+    if headers or body:
+        job["extendedData"] = {"headers": headers or {}, "body": body}
+    hdrs = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    c = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=15)
+    try:
+        r = c.put("/jobs", headers=hdrs, json={"job": job})
+    finally:
+        if client is None:
+            c.close()
+    if r.status_code not in (200, 201):
+        raise CronJobOrgError(f"cron-job.org PUT failed: {r.status_code} {r.text[:200]}")
+    return int(r.json()["jobId"])

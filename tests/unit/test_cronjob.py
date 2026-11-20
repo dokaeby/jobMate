@@ -58,3 +58,54 @@ def test_update_schedule_error():
     c = CronJobOrgClient("k", "1", client=client)
     with pytest.raises(CronJobOrgError):
         c.update_schedule(interval_schedule(30))
+
+
+def test_create_job():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers.get("authorization")
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"jobId": 424242})
+
+    from jobmate.adapters.cronjob import create_job
+
+    client = httpx.Client(
+        base_url="https://api.cron-job.org", transport=httpx.MockTransport(handler)
+    )
+    jid = create_job(
+        "key123",
+        title="jobMate email check",
+        url="https://jm.example.com/api/v1/email/check",
+        schedule=interval_schedule(30),
+        headers={"X-API-Key": "k"},
+        body='{"limit":5}',
+        client=client,
+    )
+    assert jid == 424242
+    assert captured["method"] == "PUT"
+    assert captured["url"].endswith("/jobs")
+    assert captured["auth"] == "Bearer key123"
+    job = captured["body"]["job"]
+    assert job["title"] == "jobMate email check"
+    assert job["url"] == "https://jm.example.com/api/v1/email/check"
+    assert job["requestMethod"] == 1
+    assert job["extendedData"] == {"headers": {"X-API-Key": "k"}, "body": '{"limit":5}'}
+    assert job["schedule"]["minutes"] == [0, 30]
+
+
+def test_create_job_error():
+    from jobmate.adapters.cronjob import create_job
+
+    client = httpx.Client(
+        base_url="https://api.cron-job.org",
+        transport=httpx.MockTransport(lambda r: httpx.Response(500, text="boom")),
+    )
+    with pytest.raises(CronJobOrgError):
+        create_job("k", title="t", url="https://x", schedule=interval_schedule(60), client=client)
+    with pytest.raises(CronJobOrgError):
+        create_job("", title="t", url="https://x", schedule=interval_schedule(60), client=client)

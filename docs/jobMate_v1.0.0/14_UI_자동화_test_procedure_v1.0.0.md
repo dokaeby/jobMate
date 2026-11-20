@@ -40,6 +40,13 @@ uv run pytest                      # 전체 (UI 포함)
 | test_coding_view_tool_options | 코드 어댑터 CLI 목록 로드 | — |
 | test_settings_dialog_save | 설정 저장 → GET /settings 반영 확인 | UI-04 일부 |
 | test_push_toggle_without_vapid | VAPID 미설정 시 alert 안내·화면 유지 | UI-07 일부 |
+| test_coding_run_agent_sse_done | 코딩 에이전트 실행→SSE→완료 렌더링 | — |
+| test_coding_run_polling_fallback | SSE 실패 시 폴링 폴백 | — |
+| test_coding_cancel_running | 실행 중 취소 버튼→cancelled | — |
+| test_coding_recent_job_load | 최근 작업 카드 클릭→결과 로드 | — |
+| test_calendar_review_reject | 검토 필요 카드→거부→rejected | — |
+| test_calendar_review_approve_with_edit | 수정값 승인→캘린더 등록→registered | — |
+| test_calendar_review_invalid_edit_rejected | 무효 수정값 승인 거부→needs_review 유지 | — |
 
 ## 미구현/수동 확인 필요 케이스
 

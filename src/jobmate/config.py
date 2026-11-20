@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     cronjob_base_url: str = "https://api.cron-job.org"
     cronjob_job_id: str = ""  # 이메일 체크 job id (JOBMATE_CRONJOB_JOB_ID)
     cronjob_radar_job_id: str = ""  # 레이더 수집 job id (선택)
+    public_base_url: str = ""  # JOBMATE_PUBLIC_BASE_URL — cron-job.org job URL 생성용
 
     def model_for(self, role: str, tier: str = "default") -> ModelConfig:
         """역할별 오버라이드 → 티어 기본값 순으로 ModelConfig를 만든다.

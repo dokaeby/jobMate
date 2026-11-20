@@ -216,6 +216,7 @@
         <h1 class="page-title">Calendar</h1>
         <p class="page-desc">추출·등록된 일정과 알림 예약</p>
       </div>
+      <div id="calendar-review"></div>
       <div id="calendar-cards"><div class="empty">로딩…</div></div>
     </section>
 
@@ -587,8 +588,38 @@ function pollCodingJob(jobId) {
 }
 
 /* ── Calendar ── */
+const REVIEW_STATUSES = ["needs_review", "needs_confirmation", "candidate"];
 async function loadCalendar() {
   const el = $("#calendar-cards");
+  const revEl = $("#calendar-review");
+  try {
+    const reviewLists = await Promise.all(
+      REVIEW_STATUSES.map(s => api("/events?status=" + s + "&limit=20")));
+    const pending = reviewLists.flat();
+    revEl.innerHTML = pending.length ? `
+      <h3 style="margin:0 0 10px;font-size:15px">검토 필요 (${pending.length})</h3>` +
+      pending.map(ev => `
+      <div class="card" data-review="${esc(ev.id)}" style="margin-bottom:10px">
+        <div class="card-top">${badge(ev.status)}
+          <span class="card-meta mono">${esc(ev.reason || "")}</span></div>
+        <div class="card-title">${esc(ev.title)}</div>
+        <div class="card-meta" style="margin:6px 0">${esc(ev.start_at)} ~ ${esc(ev.end_at)} (${esc(ev.timezone || "")})</div>
+        <div class="grid-form" style="margin-top:8px">
+          <input class="rv-title" value="${esc(ev.title)}" placeholder="제목">
+          <input class="rv-start" value="${esc(ev.start_at)}" placeholder="시작 (ISO)">
+          <input class="rv-end" value="${esc(ev.end_at)}" placeholder="종료 (ISO)">
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="rv-approve" data-id="${esc(ev.id)}">승인·등록</button>
+          <button class="secondary rv-reject" data-id="${esc(ev.id)}">거부</button>
+        </div>
+        <div class="card-meta rv-msg" role="status"></div>
+      </div>`).join("") : "";
+    revEl.querySelectorAll(".rv-approve").forEach(b => b.addEventListener("click", () =>
+      reviewEvent(b.dataset.id, "approve", b.closest("[data-review]"))));
+    revEl.querySelectorAll(".rv-reject").forEach(b => b.addEventListener("click", () =>
+      reviewEvent(b.dataset.id, "reject", b.closest("[data-review]"))));
+  } catch (e) { revEl.innerHTML = ""; }
   try {
     const [events, jobs] = await Promise.all([
       api("/events?limit=50"), api("/notification-jobs?limit=20")]);
@@ -611,6 +642,23 @@ async function loadCalendar() {
     el.innerHTML = (evHtml || '<div class="empty">등록된 일정 없음</div>') +
       (jobHtml ? `<h3 style="margin:20px 0 10px;font-size:15px">알림 예약</h3>` + jobHtml : "");
   } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function reviewEvent(id, action, card) {
+  const msg = card.querySelector(".rv-msg");
+  const body = {action};
+  if (action === "approve") {
+    body.title = card.querySelector(".rv-title").value;
+    body.start_at = card.querySelector(".rv-start").value;
+    body.end_at = card.querySelector(".rv-end").value;
+  }
+  try {
+    const r = await api("/events/" + encodeURIComponent(id) + "/review",
+      {method: "POST", headers: {"Content-Type": "application/json"},
+       body: JSON.stringify(body)});
+    msg.textContent = action === "approve"
+      ? `등록됨 (${r.calendar_event_id || ""})` : "거부됨";
+    setTimeout(loadCalendar, 800);
+  } catch (e) { msg.textContent = e.message; }
 }
 
 /* ── Skill Radar ── */

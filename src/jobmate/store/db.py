@@ -1248,6 +1248,40 @@ class Store:
         args.append(limit)
         return [dict(r) for r in self._conn.execute(q, args).fetchall()]
 
+    _SCHEDULED_EVENT_FIELDS = (
+        "title",
+        "start_at",
+        "end_at",
+        "timezone",
+        "location",
+        "attendees_json",
+        "summary",
+        "status",
+        "confidence",
+        "reason",
+        "calendar_event_id",
+        "source_refs",
+    )
+
+    def get_scheduled_event(self, event_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_events WHERE id=?", (event_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_scheduled_event(self, event_id: str, **fields: Any) -> bool:
+        sets = {k: v for k, v in fields.items() if k in self._SCHEDULED_EVENT_FIELDS}
+        if not sets:
+            return False
+        sets["updated_at"] = _iso(_now())
+        cols = ", ".join(f"{k}=?" for k in sets)
+        with self.tx() as c:
+            cur = c.execute(
+                f"UPDATE scheduled_events SET {cols}, version=version+1 WHERE id=?",  # noqa: S608 - cols는 화이트리스트 필드명만 사용
+                (*sets.values(), event_id),
+            )
+        return cur.rowcount > 0
+
     # ---- notification_jobs ----
     def save_notification_job(self, scheduled_event_id: str, notify_type: str, fire_at: str) -> str:
         job_id = f"job:{scheduled_event_id}:{notify_type}:{fire_at}"

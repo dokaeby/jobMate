@@ -289,3 +289,177 @@ def test_settings_prefs_roundtrip():
     assert r.status_code == 422
     r = client.post("/api/v1/settings", json={"coding_tool": "bogus"})
     assert r.status_code == 422
+
+
+class _FakeCalendar:
+    def __init__(self, existing: str | None = None) -> None:
+        self.created: list[dict] = []
+        self._existing = existing
+
+    def find_by_marker(self, marker: str) -> str | None:
+        return self._existing
+
+    def create_event(self, **kwargs) -> str:
+        self.created.append(kwargs)
+        return "cal-evt-1"
+
+
+def _seed_review_event(store: Store, event_id: str = "gmail:m1", **over) -> None:
+    kw = dict(
+        event_id=event_id,
+        source_provider="gmail",
+        source_id="m1",
+        title="팀 회의",
+        start_at="not-a-date",
+        end_at="2025-01-10T11:00:00+09:00",
+        timezone="Asia/Seoul",
+        status="needs_review",
+        confidence=0.3,
+        reason="bad_datetime",
+    )
+    kw.update(over)
+    store.save_scheduled_event(**kw)
+
+
+def _client_with_calendar(cal):
+    db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
+    settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
+    store = Store(db)
+    llm = scripted_llm(default_outputs())
+    app = create_app(settings=settings, store=store, llm=llm, adapters={"calendar": cal})
+    return TestClient(app), store
+
+
+def test_event_review_reject():
+    cal = _FakeCalendar()
+    client, store = _client_with_calendar(cal)
+    _seed_review_event(store)
+    r = client.post("/api/v1/events/gmail:m1/review", json={"action": "reject"})
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    assert store.get_scheduled_event("gmail:m1")["status"] == "rejected"
+    assert cal.created == []
+
+
+def test_event_review_approve_with_edits():
+    cal = _FakeCalendar()
+    client, store = _client_with_calendar(cal)
+    _seed_review_event(store)
+    r = client.post(
+        "/api/v1/events/gmail:m1/review",
+        json={
+            "action": "approve",
+            "start_at": "2025-01-10T10:00:00+09:00",
+            "end_at": "2025-01-10T11:00:00+09:00",
+        },
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["status"] == "registered" and d["calendar_event_id"] == "cal-evt-1"
+    assert len(cal.created) == 1
+    assert cal.created[0]["marker"] == "review:gmail:m1"
+    ev = store.get_scheduled_event("gmail:m1")
+    assert ev["status"] == "registered" and ev["calendar_event_id"] == "cal-evt-1"
+
+
+def test_event_review_approve_still_invalid():
+    cal = _FakeCalendar()
+    client, store = _client_with_calendar(cal)
+    _seed_review_event(store)
+    r = client.post(
+        "/api/v1/events/gmail:m1/review",
+        json={"action": "approve", "end_at": "2020-01-01T00:00:00+09:00"},
+    )
+    assert r.status_code == 422
+    assert store.get_scheduled_event("gmail:m1")["status"] == "needs_review"
+    assert cal.created == []
+
+
+def test_event_review_duplicate_marker_and_states():
+    cal = _FakeCalendar(existing="cal-existing")
+    client, store = _client_with_calendar(cal)
+    _seed_review_event(store)
+    _seed_review_event(store, event_id="gmail:m2", status="registered")
+    r = client.post(
+        "/api/v1/events/gmail:m1/review",
+        json={
+            "action": "approve",
+            "start_at": "2025-01-10T10:00:00+09:00",
+            "end_at": "2025-01-10T11:00:00+09:00",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["calendar_event_id"] == "cal-existing"
+    assert cal.created == []  # find_by_marker 재사용, 중복 생성 없음
+    # 이미 registered인 이벤트는 리뷰 불가
+    r2 = client.post("/api/v1/events/gmail:m2/review", json={"action": "reject"})
+    assert r2.status_code == 409
+    r3 = client.post("/api/v1/events/nope/review", json={"action": "reject"})
+    assert r3.status_code == 404
+
+
+def test_event_review_no_calendar_adapter():
+    db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
+    settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
+    store = Store(db)
+    app = create_app(
+        settings=settings, store=store, llm=scripted_llm(default_outputs()), adapters={}
+    )
+    client = TestClient(app)
+    _seed_review_event(store)
+    r = client.post(
+        "/api/v1/events/gmail:m1/review",
+        json={
+            "action": "approve",
+            "start_at": "2025-01-10T10:00:00+09:00",
+            "end_at": "2025-01-10T11:00:00+09:00",
+        },
+    )
+    assert r.status_code == 503
+
+
+def test_settings_cronjob_autocreate(monkeypatch):
+    """job id 없이 API 키+public URL만 있으면 cron job 자동 생성 후 id 영속화."""
+    import jobmate.adapters.cronjob as cronjob_mod
+
+    monkeypatch.setenv("CRONJOB_ORG_API_KEY", "ckey")
+    monkeypatch.setenv("JOBMATE_PUBLIC_BASE_URL", "https://jm.example.com")
+    created: list[dict] = []
+    patched: list[str] = []
+
+    def fake_create(api_key, **kw):
+        created.append(kw)
+        return 777 + len(created)
+
+    monkeypatch.setattr(cronjob_mod, "create_job", fake_create)
+    monkeypatch.setattr(
+        cronjob_mod.CronJobOrgClient,
+        "update_schedule",
+        lambda self, sched: patched.append(self._job_id) or {},
+    )
+
+    db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
+    settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
+    store = Store(db)
+    app = create_app(
+        settings=settings, store=store, llm=scripted_llm(default_outputs()), adapters={}
+    )
+    client = TestClient(app)
+
+    r = client.post("/api/v1/settings", json={"gmail_check_minutes": 60})
+    assert r.status_code == 200
+    cj = r.json()["cronjob"]
+    assert cj["email"].startswith("created(") and cj["radar"].startswith("created(")
+    prefs = store.get_state("prefs")
+    assert prefs["cronjob_email_job_id"] == "778"
+    assert prefs["cronjob_radar_job_id"] == "779"
+    assert len(created) == 2
+    assert created[0]["url"] == "https://jm.example.com/api/v1/email/check"
+    assert created[1]["url"] == "https://jm.example.com/api/v1/radar/refresh"
+
+    # 두 번째 저장 — 생성된 id로 update만 수행, 중복 생성 없음
+    r2 = client.post("/api/v1/settings", json={"gmail_check_minutes": 30})
+    assert r2.status_code == 200
+    cj2 = r2.json()["cronjob"]
+    assert cj2["email"] == "updated" and cj2["radar"] == "updated"
+    assert len(created) == 2
+    assert patched == ["778", "779", "778", "779"]

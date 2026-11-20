@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import uuid
@@ -45,6 +46,16 @@ from ..workflows.registry_builder import build_runner
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+logger = logging.getLogger("jobmate.api")
+worker_logger = logging.getLogger("jobmate.worker")
+
+
+def _endpoint_fp(endpoint: str) -> str:
+    """push endpoint 비식별 지문 — 원문 대신 SHA256 앞 12자."""
+    import hashlib
+
+    return hashlib.sha256(endpoint.encode()).hexdigest()[:12]
+
 
 class RunCreateRequest(BaseModel):
     workflow: str = "dev_review"
@@ -63,6 +74,15 @@ class CodingRunRequest(BaseModel):
     model: str = ""
     task: str = ""
     workspace: str = ""
+
+
+class EventReviewRequest(BaseModel):
+    action: str = Field(pattern="^(approve|reject)$")
+    title: str | None = None
+    start_at: str | None = None
+    end_at: str | None = None
+    timezone: str | None = None
+    location: str | None = None
 
 
 def _default_adapters(settings: Settings, store: Store) -> dict[str, Any]:
@@ -94,7 +114,15 @@ def create_app(
     settings = settings or get_settings()
     configure_logging(settings)
     configure_langsmith(settings)
-    store = store or Store(database_dsn(settings))
+    if store is None:
+        try:
+            store = Store(database_dsn(settings))
+        except Exception:
+            logger.exception(
+                "database connect failed db=%s",
+                "postgres" if settings.database_url else settings.db_path,
+            )
+            raise
     llm = llm or CompositeLLM()
     adapters = adapters if adapters is not None else _default_adapters(settings, store)
     stop_event = threading.Event()
@@ -104,6 +132,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        logger.info(
+            "jobmate api starting mode=%s db=%s serverless=%s",
+            settings.mode,
+            "postgres" if settings.database_url else "sqlite",
+            bool(os.environ.get("VERCEL")),
+        )
         app.state.store = store
         app.state.settings = settings
         app.state.llm = llm
@@ -118,6 +152,7 @@ def create_app(
             )
             worker.start()
             coding_worker.start()
+            logger.info("automation worker + coding worker started")
         yield
         stop_event.set()
         coding_worker.stop()
@@ -135,6 +170,7 @@ def create_app(
             ("/api/v1/health", "/api/v1/webhooks/")
         ):
             if not authorized(request):
+                logger.warning("api auth failed: %s", path)
                 return err(401, "unauthorized", "invalid or missing API key", request)
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -190,6 +226,10 @@ def create_app(
         except Exception as e:
             store.update_run(run_id, status=RunStatus.FAILED, error=str(e)[:500])
             store.audit(run_id, "system", "runner_error", "", {"error": str(e)[:300]})
+            logger.warning("run %s failed: %s", run_id, str(e)[:200])
+            return
+        run = store.get_run(run_id)
+        logger.info("run %s finished status=%s", run_id, getattr(run, "status", "?"))
 
     def submit_run(workflow: str, task: str, ctx: dict[str, Any] | None = None) -> str:
         run = store.create_run(
@@ -318,6 +358,7 @@ def create_app(
             request.headers.get("X-Slack-Signature", ""),
             settings.slack_signing_secret,
         ):
+            logger.warning("slack webhook rejected: bad signature")
             return err(401, "invalid_signature", "bad slack signature", request)
         try:
             payload = json.loads(body)
@@ -354,6 +395,7 @@ def create_app(
             request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""),
             settings.telegram_webhook_secret,
         ):
+            logger.warning("telegram webhook rejected: bad secret")
             return err(401, "invalid_secret", "bad telegram secret", request)
         try:
             update = json.loads(await request.body())
@@ -418,11 +460,13 @@ def create_app(
         secret = os.environ.get("CRON_SECRET") or os.environ.get("JOBMATE_CRON_SECRET", "")
         if os.environ.get("VERCEL") and secret:
             if request.headers.get("authorization") != f"Bearer {secret}":
+                logger.warning("cron tick rejected: invalid secret")
                 return err(401, "unauthorized", "invalid cron secret", request)
         _process_pending_messages(store, settings, llm, adapters)
         _process_due_notification_jobs(store, adapters)
         _maybe_poll_gmail(store, settings, adapters)
         _maybe_daily_radar(store, settings, llm, adapters)
+        logger.info("cron tick cycle completed")
         return JSONResponse(content={"ok": True})
 
     def _cron_authorized(request: Request) -> bool:
@@ -456,9 +500,7 @@ def create_app(
                 if lines:
                     return "\n".join(lines[:3])
         except Exception as e:
-            import logging
-
-            logging.getLogger("jobmate.api").warning("email summarize failed: %s", e)
+            logger.warning("email summarize failed: %s", e)
         return fallback
 
     @app.post("/api/v1/email/check")
@@ -466,6 +508,7 @@ def create_app(
         """Gmail 최근 메일을 읽어 3줄 요약 카드를 생성·저장.
         cron-job.org 등 외부 스케줄러가 30분마다 POST로 호출."""
         if not _cron_authorized(request):
+            logger.warning("email check rejected: invalid cron secret")
             return err(401, "unauthorized", "invalid cron secret", request)
         gmail = adapters.get("gmail")
         if gmail is None:
@@ -561,7 +604,7 @@ def create_app(
             }
         )
         store.set_state(PREFS_KEY, p)
-        cronjob = _sync_cronjob(settings, p)
+        cronjob = _sync_cronjob(settings, store, p)
         return JSONResponse(content={"ok": True, "prefs": p, "cronjob": cronjob})
 
     # ---------- coding tool (코드 어댑터) ----------
@@ -708,6 +751,101 @@ def create_app(
     def notification_jobs(limit: int = 50) -> list[dict[str, Any]]:
         return store.list_notification_jobs(limit)
 
+    @app.post("/api/v1/events/{event_id}/review")
+    def review_event(event_id: str, body: EventReviewRequest, request: Request) -> JSONResponse:
+        """needs_review/needs_confirmation/candidate 일정의 사람 검토.
+
+        approve: 필드 수정분을 반영해 재검증 → Calendar 등록까지 수행.
+        reject: 상태만 rejected로 전이.
+        """
+        from ..models import ExtractedEvent
+        from ..sensors.event_validation import validate_event
+
+        ev_row = store.get_scheduled_event(event_id)
+        if ev_row is None:
+            return err(404, "not_found", "scheduled event not found", request)
+        if ev_row["status"] not in ("needs_review", "needs_confirmation", "candidate"):
+            return err(
+                409,
+                "invalid_state",
+                f"event status is {ev_row['status']}, not reviewable",
+                request,
+            )
+        if body.action == "reject":
+            store.update_scheduled_event(event_id, status="rejected", reason="rejected_by_user")
+            store.audit("", "api", "event_reject", event_id)
+            return JSONResponse(content={"ok": True, "status": "rejected"})
+
+        merged = {
+            "title": body.title if body.title is not None else ev_row["title"],
+            "start_at": body.start_at if body.start_at is not None else ev_row["start_at"],
+            "end_at": body.end_at if body.end_at is not None else ev_row["end_at"],
+            "timezone": body.timezone if body.timezone is not None else ev_row["timezone"],
+            "location": body.location if body.location is not None else ev_row["location"],
+            "summary": ev_row.get("summary") or "",
+            "confidence": max(float(ev_row.get("confidence") or 0.0), 0.9),
+            "is_ambiguous": False,
+            "is_recurring": False,
+        }
+        try:
+            cand = ExtractedEvent.model_validate(merged)
+        except Exception as e:
+            return err(422, "validation", f"invalid event fields: {str(e)[:200]}", request)
+        ok, reason = validate_event(cand)
+        if not ok:
+            store.update_scheduled_event(
+                event_id,
+                title=cand.title,
+                start_at=cand.start_at,
+                end_at=cand.end_at,
+                timezone=cand.timezone,
+                location=cand.location,
+                reason=reason,
+            )
+            return err(422, "validation", f"still invalid: {reason}", request)
+
+        cal = adapters.get("calendar")
+        if cal is None or not hasattr(cal, "create_event"):
+            return err(503, "no_adapter", "calendar adapter not configured", request)
+        marker = f"review:{event_id}"
+        try:
+            existing = cal.find_by_marker(marker) if hasattr(cal, "find_by_marker") else None
+            if existing:
+                cal_event_id = existing
+            else:
+                cal_event_id = cal.create_event(
+                    title=cand.title,
+                    start_at=cand.start_at,
+                    end_at=cand.end_at,
+                    timezone=cand.timezone,
+                    location=cand.location,
+                    marker=marker,
+                )
+        except Exception as e:
+            store.audit("", "api", "event_approve_error", event_id, {"error": str(e)[:200]})
+            return err(502, "calendar_error", str(e)[:300], request)
+        store.update_scheduled_event(
+            event_id,
+            title=cand.title,
+            start_at=cand.start_at,
+            end_at=cand.end_at,
+            timezone=cand.timezone,
+            location=cand.location,
+            status="registered",
+            reason="",
+            calendar_event_id=cal_event_id,
+        )
+        store.audit(
+            "",
+            "api",
+            "event_approve",
+            event_id,
+            {"calendar_event_id": cal_event_id},
+        )
+        return JSONResponse(
+            content={"ok": True, "status": "registered", "calendar_event_id": cal_event_id}
+        )
+
     # ---- skillRadar ----
     @app.get("/api/v1/radar/trending")
     def radar_trending(
@@ -782,11 +920,15 @@ def create_app(
         keys = body.get("keys") or {}
         if endpoint:
             store.save_push_subscription(endpoint, keys)
+            logger.info("push subscribed: sub=%s", _endpoint_fp(endpoint))
         return {"status": "subscribed"}
 
     @app.post("/api/v1/push/unsubscribe")
     def push_unsubscribe(body: dict[str, Any]) -> dict[str, str]:
-        store.delete_push_subscription(body.get("endpoint", ""))
+        endpoint = body.get("endpoint", "")
+        store.delete_push_subscription(endpoint)
+        if endpoint:
+            logger.info("push unsubscribed: sub=%s", _endpoint_fp(endpoint))
         return {"status": "unsubscribed"}
 
     return app
@@ -795,38 +937,95 @@ def create_app(
 # ---------- automation worker ----------
 
 
-def _sync_cronjob(settings: Settings, prefs: dict[str, Any]) -> dict[str, str]:
-    """prefs를 cron-job.org 실제 스케줄에 반영. 미설정/실패는 상태 문자열로 반환."""
+def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> dict[str, str]:
+    """prefs를 cron-job.org 실제 스케줄에 반영. job id가 없고 API 키+
+    public_base_url이 설정돼 있으면 job을 자동 생성하고 prefs에 id를 저장한다."""
+    import json
     import os
 
-    from ..adapters.cronjob import CronJobOrgClient, daily_at, interval_schedule, weekly_at
+    from ..adapters.cronjob import (
+        CronJobOrgClient,
+        create_job,
+        daily_at,
+        interval_schedule,
+        weekly_at,
+    )
 
     api_key = os.environ.get(settings.cronjob_api_key_env, "")
     out: dict[str, str] = {}
 
-    def push(job_id: str, schedule: dict[str, Any], label: str) -> None:
+    def ensure_job(
+        job_id: str,
+        pref_key: str,
+        title: str,
+        path: str,
+        body: str,
+        schedule: dict[str, Any],
+        label: str,
+    ) -> str:
+        """job id 확보(기존 → env → 자동 생성) 후 스케줄 갱신."""
+        job_id = job_id or str(prefs.get(pref_key) or "")
         if not job_id:
-            out[label] = "skipped(no job id)"
-        elif not api_key:
-            out[label] = "skipped(no api key)"
-        else:
+            if not api_key or not settings.public_base_url:
+                out[label] = "skipped(no job id)"
+                return ""
             try:
-                CronJobOrgClient(api_key, job_id, settings.cronjob_base_url).update_schedule(
-                    schedule
+                headers = {"Content-Type": "application/json"}
+                jm_key = os.environ.get("JOBMATE_API_KEY", "")
+                if jm_key:
+                    headers["X-API-Key"] = jm_key
+                job_id = str(
+                    create_job(
+                        api_key,
+                        base_url=settings.cronjob_base_url,
+                        title=title,
+                        url=settings.public_base_url.rstrip("/") + path,
+                        schedule=schedule,
+                        headers=headers,
+                        body=body,
+                    )
                 )
-                out[label] = "updated"
+                prefs[pref_key] = job_id
+                store.set_state("prefs", prefs)
+                out[label] = f"created({job_id})"
+                logger.info("cronjob %s auto-created job_id=%s", label, job_id)
             except Exception as e:
-                out[label] = f"error: {str(e)[:120]}"
+                out[label] = f"error(create): {str(e)[:120]}"
+                logger.warning("cronjob %s create failed: %s", label, str(e)[:200])
+                return ""
+        if not api_key:
+            out[label] = "skipped(no api key)"
+            return ""
+        try:
+            CronJobOrgClient(api_key, job_id, settings.cronjob_base_url).update_schedule(schedule)
+            out[label] = "updated" if "created" not in out.get(label, "") else out[label]
+            logger.info("cronjob %s schedule updated job_id=%s", label, job_id)
+        except Exception as e:
+            out[label] = f"error: {str(e)[:120]}"
+            logger.warning("cronjob %s update failed job_id=%s: %s", label, job_id, str(e)[:200])
+        return job_id
 
-    push(
+    ensure_job(
         settings.cronjob_job_id,
+        "cronjob_email_job_id",
+        "jobMate email check",
+        "/api/v1/email/check",
+        json.dumps({"limit": 5}),
         interval_schedule(int(prefs.get("gmail_check_minutes", 30))),
         "email",
     )
     radar_schedule = (
         weekly_at(6, 0, wday=1) if prefs.get("radar_interval") == "weekly" else daily_at(6, 0)
     )
-    push(settings.cronjob_radar_job_id, radar_schedule, "radar")
+    ensure_job(
+        settings.cronjob_radar_job_id,
+        "cronjob_radar_job_id",
+        "jobMate radar refresh",
+        "/api/v1/radar/refresh",
+        json.dumps({"force": True}),
+        radar_schedule,
+        "radar",
+    )
     return out
 
 
@@ -842,9 +1041,7 @@ def _automation_loop(
             _maybe_poll_gmail(store, settings, adapters)
             _maybe_daily_radar(store, settings, llm, adapters)
         except Exception:
-            import logging
-
-            logging.getLogger("jobmate.worker").exception("automation loop error")
+            worker_logger.exception("automation loop error")
         stop.wait(settings.worker_interval_seconds)
 
 
@@ -859,6 +1056,12 @@ def _process_pending_messages(
             if attempts > 5:
                 store.finish_message(
                     provider, source_id, "failed", "max attempts", attempts=attempts
+                )
+                worker_logger.warning(
+                    "message %s:%s failed permanently after %s attempts",
+                    provider,
+                    source_id,
+                    attempts,
                 )
                 continue
             ctx = {
@@ -876,6 +1079,13 @@ def _process_pending_messages(
                 provider, source_id, "processed", f"run:{run_id}", attempts=attempts
             )
         except Exception as e:
+            worker_logger.warning(
+                "message %s:%s processing failed (attempt %s): %s",
+                provider,
+                source_id,
+                attempts,
+                str(e)[:200],
+            )
             retry_at = datetime.now(UTC) + timedelta(seconds=min(300, 2**attempts))
             store.finish_message(
                 provider,
@@ -901,6 +1111,8 @@ def _create_and_run(
     )
     runner = build_runner(workflow, store=store, llm=llm, settings=settings, adapters=adapters)
     runner.invoke(run.id, {"task": task}, gmail_ctx=ctx)
+    done = store.get_run(run.id)
+    logger.info("run %s finished status=%s", run.id, getattr(done, "status", "?"))
     return run.id
 
 
@@ -927,8 +1139,12 @@ def _process_due_notification_jobs(store: Store, adapters: dict[str, Any]) -> No
                     break
             notifier.send(title=title, body="", source_url=source_url)
             store.mark_job(job["id"], "delivered")
+            logger.debug("notification job %s delivered", job["id"])
         except Exception as e:
             store.mark_job(job["id"], "failed", str(e)[:200])
+            worker_logger.warning(
+                "notification job %s delivery failed: %s", job["id"], str(e)[:200]
+            )
 
 
 def _maybe_poll_gmail(store: Store, settings: Settings, adapters: dict[str, Any]) -> None:
@@ -954,8 +1170,11 @@ def _maybe_poll_gmail(store: Store, settings: Settings, adapters: dict[str, Any]
         auto["last_gmail_poll_at"] = datetime.now(UTC).isoformat()
         auto["last_poll_result"] = f"ingested:{ingested}"
         auto["last_gmail_error"] = ""
+        if ingested:
+            logger.info("gmail poll ingested %d new messages", ingested)
     except Exception as e:
         auto["last_gmail_error"] = type(e).__name__
+        worker_logger.warning("gmail poll failed: %s", type(e).__name__)
     store.set_automation(auto)
 
 
@@ -998,6 +1217,7 @@ def _maybe_daily_radar(
             pass
     if adapters.get("github") is None:
         return
+    scheduled = []
     for p in settings.radar_platforms:
         if not store.radar_snapshot_exists(p, today):
             _create_and_run(
@@ -1009,8 +1229,11 @@ def _maybe_daily_radar(
                 f"radar daily {p}",
                 {"platform": p, "force": False},
             )
+            scheduled.append(p)
     auto["last_radar_date"] = today
     store.set_automation(auto)
+    if scheduled:
+        logger.info("radar daily collect scheduled: %s", ",".join(scheduled))
 
 
 app = create_app()

@@ -31,10 +31,15 @@ class WebPushNotifier:
         self._store = store
         self._private_key = private_key
         self._subject = subject
+        self._vapid_warned = False
 
     def send(self, *, title: str, body: str, source_url: str) -> None:
         if not self._private_key:
-            logger.debug("webpush skipped: VAPID_PRIVATE_KEY not set")
+            if not self._vapid_warned:
+                self._vapid_warned = True
+                logger.warning("webpush skipped: VAPID_PRIVATE_KEY not set")
+            else:
+                logger.debug("webpush skipped: VAPID_PRIVATE_KEY not set")
             return
         subs = self._store.list_push_subscriptions()
         if not subs:
@@ -50,6 +55,7 @@ class WebPushNotifier:
                     vapid_private_key=self._private_key,
                     vapid_claims={"sub": self._subject},
                 )
+                logger.debug("webpush sent: sub=%s", _fingerprint(sub["endpoint"]))
             except WebPushException as e:
                 status = getattr(e.response, "status_code", None)
                 if status in (404, 410):
@@ -69,3 +75,4 @@ class WebPushNotifier:
                 )
         for endpoint in stale:
             self._store.delete_push_subscription(endpoint)
+            logger.info("webpush subscription removed (expired): sub=%s", _fingerprint(endpoint))
