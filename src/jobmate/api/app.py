@@ -1002,10 +1002,13 @@ def create_app(
             dates = store.radar_dates(platform)
             if not dates:
                 return JSONResponse(
-                    status_code=404,
                     content={
-                        "error": {"code": "no_snapshot", "message": "no snapshot for platform"}
-                    },
+                        "platform": platform,
+                        "date": date_str,
+                        "lang": lang,
+                        "status": "no_snapshot",
+                        "items": [],
+                    }
                 )
             date_str = dates[0]
             snap = store.radar_snapshot(platform, date_str)
@@ -1061,7 +1064,10 @@ def create_app(
         return {
             "rank": row.get("rank"),
             "repo": row.get("repo_full_name"),
+            "repo_full_name": row.get("repo_full_name"),
             "url": row.get("repo_url"),
+            "repo_url": row.get("repo_url"),
+            "appearances": row.get("appearances") or 1,
             "description": row.get("description"),
             "stars": row.get("stars"),
             "stars_today": row.get("stars_today"),

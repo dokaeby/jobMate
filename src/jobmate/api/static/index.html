@@ -105,99 +105,260 @@
   .digest pre { white-space: pre-wrap; font-family: inherit;
                 font-size: 14px; margin: 0; color: var(--ink-2); }
   .empty { color: var(--muted); text-align: center; padding: 40px 0; }
-  /* ── Skill Radar ── */
-  .radar-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-  .radar-tabs { display: inline-flex; gap: 2px; background: var(--surface-hover);
-                border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
-  .radar-tabs button { border: none; background: transparent; color: var(--muted);
-                       padding: 5px 12px; border-radius: 7px; font-weight: 600; font-size: 13px; }
-  .radar-tabs button.on { background: var(--surface); color: var(--ink);
-                          box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-  .radar-topics { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px;
-                  scrollbar-width: thin; }
-  .radar-chip { flex-shrink: 0; border: 1px solid var(--border); background: var(--surface);
-                color: var(--ink-2); border-radius: 999px; padding: 4px 12px;
-                font-size: 12px; font-weight: 600; cursor: pointer; }
-  .radar-chip:hover { border-color: var(--accent-border); color: var(--accent); }
-  .radar-chip.on { background: var(--accent-soft); border-color: var(--accent-border);
-                   color: var(--accent); }
-  .radar-chip .cnt { color: var(--muted); font-weight: 500; margin-left: 4px; }
-  #radar-topic-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-                      margin-bottom: 12px; }
-  #radar-topic-head button { padding: 5px 12px; font-size: 13px; }
-  .radar-topic-title { font-weight: 800; font-size: 16px; }
-  .radar-related { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; margin-top: 6px; }
-  .radar-related .radar-chip { font-size: 11px; padding: 3px 10px; }
-  #radar-filters { display: flex; gap: 14px; align-items: center; margin-bottom: 14px;
-                   flex-wrap: wrap; }
-  #radar-filters select { width: auto; }
-  .radar-minstars { display: flex; align-items: center; gap: 8px; font-size: 13px;
-                    color: var(--ink-2); font-weight: 600; }
-  .radar-minstars input[type=range] { width: 140px; accent-color: var(--accent); }
-  .radar-grid { display: grid; gap: 14px;
-                grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
-  .radar-card { display: flex; flex-direction: column; gap: 10px; }
-  .radar-card-head { display: flex; gap: 10px; align-items: flex-start; }
-  .radar-rank { flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
-                background: var(--surface-hover); border: 1px solid var(--border);
-                display: flex; align-items: center; justify-content: center;
-                font-weight: 800; font-size: 13px; color: var(--ink-2); }
-  .radar-name { font-weight: 700; font-size: 15px; color: var(--ink);
-                text-decoration: none; word-break: break-all; }
-  .radar-name:hover { color: var(--accent); }
-  .radar-desc { font-size: 12px; color: var(--muted); margin: 2px 0 0;
-                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: clamp: 2; overflow: hidden; }
-  .radar-badges { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
-  .radar-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
-                 border: 1px solid var(--border); background: var(--surface-hover);
-                 color: var(--ink-2); text-transform: uppercase; letter-spacing: .03em; }
-  .radar-badge.tax { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
-  .radar-badge.lic { background: #fffbeb; border-color: #fde68a; color: #92400e; }
-  .radar-badge.plat-claude { color: #b4552d; }
-  .radar-badge.plat-chatgpt { color: #0b7a5c; }
-  .radar-badge.plat-gemini { color: #2b63d9; }
-  .radar-badge.up { color: var(--ok); border-color: var(--ok-border); background: var(--ok-soft); }
-  .radar-summary { list-style: none; margin: 0; padding: 0; font-size: 13px;
-                   color: var(--ink-2); display: grid; gap: 6px; }
-  .radar-summary li { display: flex; gap: 8px; }
-  .radar-summary li::before { content: ""; flex-shrink: 0; width: 5px; height: 5px;
-                              border-radius: 50%; background: var(--muted);
-                              margin-top: 8px; }
-  .radar-topics-row { display: flex; gap: 5px; flex-wrap: wrap; }
-  .radar-topic-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px;
-                     background: var(--surface-hover); border: 1px solid var(--border);
-                     color: var(--muted); cursor: pointer; }
-  .radar-topic-tag:hover { color: var(--accent); border-color: var(--accent-border); }
-  .radar-card-foot { display: flex; justify-content: space-between; align-items: center;
-                     border-top: 1px solid var(--border); padding-top: 10px; margin-top: auto; }
-  .radar-stars { font-size: 12px; color: var(--ink-2); font-weight: 700; }
-  .radar-gh { font-size: 12px; font-weight: 600; color: var(--accent);
-              text-decoration: none; padding: 5px 10px; border-radius: 8px;
-              border: 1px solid var(--border); }
-  .radar-gh:hover { background: var(--accent-soft); }
-  #radar-detail .card { padding: 20px; }
-  .radar-detail-head { display: flex; justify-content: space-between; gap: 12px;
-                       align-items: flex-start; flex-wrap: wrap; }
-  .radar-detail-sum { margin-top: 16px; }
-  .radar-detail-sum h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
-                         color: var(--muted); margin: 0 0 10px; }
-  .radar-lang-tabs { display: inline-flex; gap: 4px; margin-bottom: 10px; }
-  .radar-lang-tabs button { border: 1px solid var(--border); background: var(--surface);
-                            color: var(--muted); padding: 4px 12px; border-radius: 8px;
-                            font-size: 12px; font-weight: 700; cursor: pointer; }
-  .radar-lang-tabs button.on { background: var(--accent-soft); color: var(--accent);
-                               border-color: var(--accent-border); }
-  .radar-readme { margin-top: 14px; }
-  .radar-readme summary { font-size: 12px; font-weight: 700; color: var(--muted);
-                          cursor: pointer; text-transform: uppercase; letter-spacing: .06em; }
-  .radar-readme pre { margin-top: 8px; font-size: 12px; white-space: pre-wrap;
-                      background: var(--surface-hover); border: 1px solid var(--border);
-                      border-radius: 10px; padding: 12px; max-height: 320px; overflow: auto;
-                      color: var(--ink-2); }
-  .radar-detail-back { background: none; border: none; color: var(--muted);
-                       font-size: 13px; font-weight: 600; cursor: pointer; padding: 0;
-                       margin-bottom: 10px; }
-  .radar-detail-back:hover { color: var(--accent); }
+  /* ── Skill Radar (skillRadar UI 포팅) ── */
+  #view-radar { padding: 0; }
+  .sr-root {
+    --sr-bg: #07090f; --sr-card: rgba(255,255,255,.035); --sr-card-brd: rgba(255,255,255,.08);
+    --sr-card-hov: rgba(255,255,255,.055); --sr-ink: #e2e8f0; --sr-ink2: #94a3b8;
+    --sr-faint: #64748b; --sr-chip: rgba(255,255,255,.05); --sr-chip-brd: rgba(255,255,255,.07);
+    --sr-sel: rgba(255,255,255,.04); --sr-sel-brd: rgba(255,255,255,.10);
+    --sr-tab-on: rgba(255,255,255,.08); --sr-line: rgba(255,255,255,.06);
+    --sr-grad1: rgba(66,133,244,.14); --sr-grad2: rgba(217,119,87,.10); --sr-grad3: rgba(16,163,127,.08);
+    position: relative; color: var(--sr-ink); font-size: 14px; line-height: 1.5;
+    background-color: var(--sr-bg);
+    background-image:
+      radial-gradient(900px 420px at 15% -8%, var(--sr-grad1), transparent 60%),
+      radial-gradient(800px 400px at 85% -10%, var(--sr-grad2), transparent 60%),
+      radial-gradient(700px 380px at 50% 110%, var(--sr-grad3), transparent 60%);
+    background-attachment: fixed;
+    border-radius: 14px; padding: 0 0 24px; margin: -8px -8px 0;
+    min-height: calc(100vh - 60px);
+  }
+  .sr-root.sr-light {
+    --sr-bg: #f6f7f9; --sr-card: rgba(255,255,255,.75); --sr-card-brd: rgba(15,23,42,.08);
+    --sr-card-hov: #fff; --sr-ink: #1e293b; --sr-ink2: #475569;
+    --sr-faint: #94a3b8; --sr-chip: rgba(15,23,42,.05); --sr-chip-brd: rgba(15,23,42,.10);
+    --sr-sel: #fff; --sr-sel-brd: rgba(15,23,42,.14);
+    --sr-tab-on: rgba(15,23,42,.08); --sr-line: rgba(15,23,42,.08);
+    --sr-grad1: rgba(66,133,244,.08); --sr-grad2: rgba(217,119,87,.06); --sr-grad3: transparent;
+  }
+  .sr-header { position: sticky; top: -1px; z-index: 20; backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--sr-bg) 72%, transparent);
+    border-bottom: 1px solid var(--sr-line); padding: 12px 20px 0; }
+  .sr-header-top { max-width: 1200px; margin: 0 auto; display: flex; align-items: center;
+    gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
+  .sr-brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+  .sr-logo { width: 36px; height: 36px; border-radius: 12px; display: flex;
+    align-items: center; justify-content: center; color: #fff; font-weight: 800;
+    font-size: 13px; background: linear-gradient(135deg,#d97757,#10a37f,#4285f4);
+    box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+  .sr-title { font-size: 17px; font-weight: 800; margin: 0; letter-spacing: -.01em; }
+  .sr-sub { font-size: 11px; color: var(--sr-faint); margin: 0; }
+  .sr-lang-toggle { display: inline-flex; border: 1px solid var(--sr-sel-brd);
+    background: var(--sr-sel); border-radius: 9px; padding: 2px; gap: 2px; }
+  .sr-lang-toggle button { border: none; background: transparent; color: var(--sr-ink2);
+    padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .sr-lang-toggle button.sr-on { background: var(--sr-tab-on); color: var(--sr-ink); }
+  .sr-icon-btn { border: 1px solid var(--sr-sel-brd); background: var(--sr-sel); color: var(--sr-ink2);
+    padding: 7px; border-radius: 9px; cursor: pointer; display: inline-flex; }
+  .sr-icon-btn:hover { color: var(--sr-ink); }
+  .sr-refresh-btn { border: 1px solid rgba(16,185,129,.3); background: rgba(16,185,129,.10);
+    color: #34d399; padding: 7px 14px; border-radius: 9px; font-size: 12px; font-weight: 700;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .sr-refresh-btn:hover { background: rgba(16,185,129,.18); }
+  .sr-status { font-size: 11px; color: var(--sr-faint); max-width: 340px; }
+  .sr-trendbar { max-width: 1200px; margin: 0 auto; display: flex; align-items: center;
+    gap: 20px; flex-wrap: wrap; padding-bottom: 10px; }
+  .sr-platform-tabs { display: flex; gap: 4px; }
+  .sr-platform-tabs button { border: none; background: transparent; padding: 6px 12px;
+    border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .sr-platform-tabs button[data-platform="claude"] { color: #e08a63; }
+  .sr-platform-tabs button[data-platform="chatgpt"] { color: #34c9a3; }
+  .sr-platform-tabs button[data-platform="gemini"] { color: #6ea3ff; }
+  .sr-platform-tabs button.sr-tab-active { box-shadow: inset 0 -2px 0 currentColor; }
+  .sr-root.sr-light .sr-platform-tabs button[data-platform="claude"] { color: #b4552d; }
+  .sr-root.sr-light .sr-platform-tabs button[data-platform="chatgpt"] { color: #0b7a5c; }
+  .sr-root.sr-light .sr-platform-tabs button[data-platform="gemini"] { color: #2b63d9; }
+  .sr-period-tabs { display: flex; gap: 4px; border-left: 1px solid var(--sr-line);
+    padding-left: 16px; }
+  .sr-period-tabs button { border: none; background: transparent; color: var(--sr-faint);
+    padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .sr-period-tabs button.sr-tab-active { background: var(--sr-tab-on); color: var(--sr-ink); }
+  .sr-date-wrap { margin-left: auto; display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--sr-faint); }
+  .sr-date-wrap select, .sr-tax-select, .sr-select {
+    background: var(--sr-sel); border: 1px solid var(--sr-sel-brd); color: var(--sr-ink);
+    border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+  .sr-filterbar { max-width: 1200px; margin: 0 auto; padding: 0 20px 12px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .sr-filterbar label { display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: var(--sr-faint); }
+  .sr-minstars { flex: 1; min-width: 160px; max-width: 320px; }
+  .sr-minstars input[type=range] { flex: 1; accent-color: #3b82f6; }
+  .sr-minstars-val { width: 44px; text-align: right; font-weight: 700; color: var(--sr-ink2); }
+  .sr-layout { max-width: 1200px; margin: 0 auto; padding: 12px 20px 0;
+    display: flex; flex-direction: column; gap: 24px; }
+  @media (min-width: 1024px) { .sr-layout { flex-direction: row; } }
+  .sr-aside { flex-shrink: 0; }
+  @media (min-width: 1024px) { .sr-aside { width: 240px; } }
+  .sr-aside-inner { position: sticky; top: 110px; }
+  .sr-aside-head { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 0 4px; margin-bottom: 8px; }
+  .sr-aside-head h2 { font-size: 11px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--sr-faint); margin: 0; }
+  .sr-aside-head span { font-size: 10px; color: var(--sr-faint); opacity: .7; }
+  .sr-topic-list { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 8px; }
+  @media (min-width: 1024px) {
+    .sr-topic-list { flex-direction: column; overflow: visible; padding-bottom: 0; }
+  }
+  .sr-topic-btn { flex-shrink: 0; text-align: left; border: none; background: transparent;
+    color: var(--sr-ink2); padding: 8px 12px; border-radius: 9px; font-size: 13px;
+    font-weight: 500; cursor: pointer; display: flex; justify-content: space-between;
+    align-items: center; gap: 8px; width: auto; }
+  @media (min-width: 1024px) { .sr-topic-btn { width: 100%; } }
+  .sr-topic-btn:hover { background: var(--sr-chip); color: var(--sr-ink); }
+  .sr-topic-btn.sr-on { background: var(--sr-tab-on); color: var(--sr-ink); font-weight: 700; }
+  .sr-topic-cnt { flex-shrink: 0; font-size: 10px; padding: 1px 7px; border-radius: 999px;
+    background: var(--sr-chip); border: 1px solid var(--sr-chip-brd); color: var(--sr-faint); }
+  .sr-main { flex: 1; min-width: 0; }
+  .sr-topic-header { margin-bottom: 16px; }
+  .sr-topic-back { border: none; background: transparent; color: var(--sr-faint);
+    font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; margin-bottom: 8px;
+    display: inline-flex; align-items: center; gap: 4px; }
+  .sr-topic-back:hover { color: var(--sr-ink); }
+  .sr-topic-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .sr-topic-title { font-size: 18px; font-weight: 800; margin: 0; letter-spacing: -.01em; }
+  .sr-topic-count { font-size: 11px; padding: 2px 9px; border-radius: 999px;
+    background: var(--sr-chip); border: 1px solid var(--sr-sel-brd); color: var(--sr-ink2); }
+  .sr-topic-ptabs { display: flex; gap: 4px; margin-top: 12px; font-size: 12px; font-weight: 700; }
+  .sr-topic-ptabs button { border: none; background: transparent; padding: 6px 12px;
+    border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; }
+  .sr-topic-ptabs button[data-tplatform="all"] { color: var(--sr-ink2); }
+  .sr-topic-ptabs button[data-tplatform="claude"] { color: #e08a63; }
+  .sr-topic-ptabs button[data-tplatform="chatgpt"] { color: #34c9a3; }
+  .sr-topic-ptabs button[data-tplatform="gemini"] { color: #6ea3ff; }
+  .sr-topic-ptabs button.sr-tab-active { background: var(--sr-tab-on); }
+  .sr-related { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .sr-related-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--sr-faint); margin-right: 4px; }
+  .sr-rel-chip { border: 1px solid var(--sr-sel-brd); background: var(--sr-sel);
+    color: var(--sr-ink2); border-radius: 999px; padding: 4px 11px; font-size: 11px;
+    font-weight: 600; cursor: pointer; }
+  .sr-rel-chip:hover { color: #f08a63; border-color: rgba(217,119,87,.5); }
+  .sr-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 768px) { .sr-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1280px) { .sr-grid { grid-template-columns: repeat(3, 1fr); } }
+  .sr-card { position: relative; background: var(--sr-card); border: 1px solid var(--sr-card-brd);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px;
+    overflow: hidden; transition: transform .22s cubic-bezier(.22,1,.36,1),
+      border-color .22s, box-shadow .22s, background .22s; }
+  .sr-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent); }
+  .sr-light .sr-card::before { background: linear-gradient(90deg, transparent, rgba(15,23,42,.10), transparent); }
+  .sr-card:hover { transform: translateY(-3px); border-color: var(--sr-sel-brd);
+    background: var(--sr-card-hov); box-shadow: 0 12px 40px -12px rgba(0,0,0,.5); }
+  .sr-card-top { display: flex; gap: 12px; align-items: flex-start; }
+  .sr-rank { flex-shrink: 0; width: 36px; height: 36px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-weight: 800;
+    font-size: 14px; color: var(--sr-ink);
+    background: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.05));
+    border: 1px solid rgba(255,255,255,.12); font-variant-numeric: tabular-nums; }
+  .sr-light .sr-rank { background: rgba(15,23,42,.08); border-color: rgba(15,23,42,.14); }
+  .sr-card-main { min-width: 0; flex: 1; }
+  .sr-repo-name { font-weight: 700; font-size: 15px; color: var(--sr-ink);
+    text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: pointer; }
+  .sr-repo-name:hover { color: #60a5fa; }
+  .sr-desc { font-size: 12px; color: var(--sr-ink2); margin: 4px 0 0; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sr-meta-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-top: 6px; }
+  .sr-plat { display: inline-flex; align-items: center; gap: 6px; font-size: 10px;
+    font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+  .sr-plat .sr-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .sr-plat-claude { color: #e08a63; } .sr-plat-claude .sr-dot { background: #d97757; }
+  .sr-plat-chatgpt { color: #34c9a3; } .sr-plat-chatgpt .sr-dot { background: #10a37f; }
+  .sr-plat-gemini { color: #6ea3ff; } .sr-plat-gemini .sr-dot { background: #4285f4; }
+  .sr-light .sr-plat-claude { color: #b4552d; }
+  .sr-light .sr-plat-chatgpt { color: #0b7a5c; }
+  .sr-light .sr-plat-gemini { color: #2b63d9; }
+  .sr-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 7px;
+    border: 1px solid var(--sr-chip-brd); background: var(--sr-chip); color: var(--sr-ink2);
+    text-transform: uppercase; letter-spacing: .03em; }
+  .sr-badge.sr-tax { background: rgba(99,102,241,.15); border-color: rgba(99,102,241,.3);
+    color: #a5b4fc; text-transform: none; }
+  .sr-light .sr-badge.sr-tax { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+  .sr-badge.sr-app { background: rgba(14,165,233,.15); border-color: rgba(14,165,233,.3);
+    color: #7dd3fc; text-transform: none; }
+  .sr-light .sr-badge.sr-app { background: #f0f9ff; border-color: #bae6fd; color: #0369a1; }
+  .sr-badge.sr-lic { background: rgba(245,158,11,.13); border-color: rgba(245,158,11,.3);
+    color: #fcd34d; text-transform: none; }
+  .sr-light .sr-badge.sr-lic { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .sr-subrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-top: 8px; font-size: 12px; color: var(--sr-ink2); }
+  .sr-star { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+  .sr-today { display: inline-flex; align-items: center; gap: 4px; }
+  .sr-today.sr-up { color: #34d399; font-weight: 700; }
+  .sr-today.sr-flat { color: var(--sr-faint); }
+  .sr-summary { list-style: none; margin: 0; padding: 0; font-size: 13px;
+    color: var(--sr-ink2); display: grid; gap: 8px; }
+  .sr-summary li { display: flex; gap: 10px; }
+  .sr-summary li::before { content: ""; flex-shrink: 0; width: 4px; height: 4px;
+    border-radius: 50%; background: var(--sr-faint); margin-top: 8px; }
+  .sr-lc3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden; }
+  .sr-card-foot { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-top: auto; padding-top: 10px;
+    border-top: 1px solid var(--sr-line); }
+  .sr-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sr-chip-tag { font-size: 10px; padding: 2px 9px; border-radius: 999px;
+    background: var(--sr-chip); border: 1px solid var(--sr-chip-brd); color: var(--sr-ink2);
+    cursor: pointer; }
+  .sr-chip-tag:hover { color: #f08a63; border-color: rgba(217,119,87,.5); }
+  .sr-gh-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 9px;
+    background: var(--sr-chip); border: 1px solid var(--sr-sel-brd); color: var(--sr-ink);
+    text-decoration: none; }
+  .sr-gh-btn:hover { background: var(--sr-tab-on); }
+  .sr-empty { text-align: center; padding: 80px 20px; }
+  .sr-empty-icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 16px;
+    background: var(--sr-chip); border: 1px solid var(--sr-sel-brd);
+    display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  .sr-empty-title { font-size: 16px; font-weight: 700; color: var(--sr-ink); margin: 0 0 6px; }
+  .sr-empty-desc { font-size: 13px; color: var(--sr-faint); margin: 0; }
+  .sr-skel { background: linear-gradient(90deg, var(--sr-chip) 25%, var(--sr-tab-on) 50%,
+    var(--sr-chip) 75%); background-size: 200% 100%; animation: sr-shimmer 1.4s infinite;
+    border-radius: 8px; }
+  @keyframes sr-shimmer { to { background-position: -200% 0; } }
+  .sr-fade-up { animation: sr-fadeUp .4s cubic-bezier(.22,1,.36,1) both; }
+  @keyframes sr-fadeUp { from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; } }
+  .sr-detail-card { background: var(--sr-card); border: 1px solid var(--sr-card-brd);
+    backdrop-filter: blur(14px); border-radius: 16px; padding: 24px; }
+  .sr-detail-head { display: flex; justify-content: space-between; gap: 12px;
+    align-items: flex-start; flex-wrap: wrap; }
+  .sr-detail-name { font-size: 20px; font-weight: 800; color: var(--sr-ink);
+    text-decoration: none; }
+  .sr-detail-name:hover { color: #60a5fa; }
+  .sr-detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 10px; font-size: 12px; color: var(--sr-ink2); }
+  .sr-detail-sum { margin-top: 20px; }
+  .sr-detail-sum h3 { font-size: 11px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--sr-faint); margin: 0 0 10px; }
+  .sr-lang-tabs { display: inline-flex; gap: 4px; margin-bottom: 12px; }
+  .sr-lang-tabs button { border: 1px solid var(--sr-sel-brd); background: var(--sr-sel);
+    color: var(--sr-faint); padding: 5px 14px; border-radius: 8px; font-size: 12px;
+    font-weight: 700; cursor: pointer; }
+  .sr-lang-tabs button.sr-on { background: var(--sr-tab-on); color: var(--sr-ink);
+    border-color: var(--sr-sel-brd); }
+  .sr-sum-pane ul { list-style: none; margin: 0; padding: 0; font-size: 14px;
+    color: var(--sr-ink2); display: grid; gap: 8px; }
+  .sr-sum-pane li { display: flex; gap: 10px; }
+  .sr-sum-pane li::before { content: ""; flex-shrink: 0; width: 4px; height: 4px;
+    border-radius: 50%; background: var(--sr-faint); margin-top: 9px; }
+  .sr-readme { margin-top: 20px; }
+  .sr-readme summary { font-size: 11px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--sr-faint); cursor: pointer; }
+  .sr-readme pre { margin-top: 10px; font-size: 12px; white-space: pre-wrap;
+    line-height: 1.6; color: var(--sr-ink2); background: var(--sr-sel);
+    border: 1px solid var(--sr-line); border-radius: 12px; padding: 16px;
+    max-height: 320px; overflow: auto; }
+  .sr-footer { max-width: 1200px; margin: 24px auto 0; padding: 0 20px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    font-size: 11px; color: var(--sr-faint); }
+  .sr-error { color: #f87171; text-align: center; padding: 40px 0; font-size: 13px; }
   .mono { font-family: ui-monospace, monospace; font-size: 13px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 10px 12px;
@@ -314,60 +475,123 @@
       <div id="calendar-cards"><div class="empty">로딩…</div></div>
     </section>
 
-    <!-- Skill Radar -->
+    <!-- Skill Radar (skillRadar UI 포팅) -->
     <section id="view-radar" hidden>
-      <div class="page-head">
-        <h1 class="page-title">Skill Radar</h1>
-        <p class="page-desc">GitHub AI 도구 트렌딩 — 플랫폼별 일일 Top10 큐레이션</p>
-        <div class="radar-controls">
-          <div class="radar-tabs" id="radar-period">
-            <button data-p="daily" class="on">일간</button>
-            <button data-p="week">주간</button>
-            <button data-p="month">월간</button>
+      <div class="sr-root" id="sr-root">
+        <header class="sr-header">
+          <div class="sr-header-top">
+            <div class="sr-brand">
+              <div class="sr-logo">SR</div>
+              <div>
+                <h1 class="sr-title">SkillRadar</h1>
+                <p class="sr-sub" data-i18n="subtitle">AI skill · plugin trending</p>
+              </div>
+            </div>
+            <div class="sr-lang-toggle" id="sr-lang-toggle">
+              <button data-lang="ko" class="sr-on">한글</button>
+              <button data-lang="en">EN</button>
+              <button data-lang="zh">中文</button>
+            </div>
+            <button class="sr-icon-btn" id="sr-theme-toggle" title="테마 전환">
+              <svg id="sr-theme-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+              <svg id="sr-theme-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            </button>
+            <button class="sr-refresh-btn" id="sr-refresh">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6"/></svg>
+              <span data-i18n="refresh">새로고침</span>
+            </button>
+            <span class="sr-status" id="sr-status" role="status"></span>
           </div>
-          <select id="radar-platform">
-            <option value="claude">claude</option>
-            <option value="chatgpt">chatgpt</option>
-            <option value="gemini">gemini</option>
-          </select>
-          <select id="radar-lang">
-            <option value="ko">한국어</option>
-            <option value="en">English</option>
-            <option value="zh">中文</option>
-          </select>
-          <select id="radar-date" hidden></select>
-          <button class="secondary" id="radar-refresh">새로고침</button>
-          <span id="radar-status" class="card-meta" role="status"></span>
+          <div class="sr-trendbar">
+            <nav class="sr-platform-tabs" id="sr-platform-tabs">
+              <button data-platform="claude" class="sr-tab-active">Claude</button>
+              <button data-platform="chatgpt">ChatGPT</button>
+              <button data-platform="gemini">Gemini</button>
+            </nav>
+            <nav class="sr-period-tabs" id="sr-period-tabs">
+              <button data-period="daily" class="sr-tab-active" data-i18n="periodDaily">일간</button>
+              <button data-period="week" data-i18n="periodWeek">주간</button>
+              <button data-period="month" data-i18n="periodMonth">월간</button>
+            </nav>
+            <div class="sr-date-wrap" id="sr-date-wrap">
+              <span data-i18n="dateLabel">기준일</span>
+              <select id="sr-date"></select>
+            </div>
+          </div>
+        </header>
+
+        <div class="sr-filterbar" id="sr-filterbar">
+          <label>
+            <span data-i18n="filterTax">분류</span>
+            <select class="sr-tax-select" id="sr-tax">
+              <option value="all" data-i18n="filterTaxAll">전체</option>
+              <option value="agents">agents</option>
+              <option value="mcp">mcp</option>
+              <option value="skills">skills</option>
+              <option value="plugins">plugins</option>
+              <option value="devtools">devtools</option>
+              <option value="automation">automation</option>
+              <option value="data">data</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label class="sr-minstars">
+            <span data-i18n="filterMinStars">최소 스타</span>
+            <input type="range" id="sr-minstars" min="0" max="50000" step="500" value="0">
+            <span class="sr-minstars-val" id="sr-minstars-label">0</span>
+          </label>
         </div>
-      </div>
 
-      <div id="radar-topics" class="radar-topics"></div>
+        <div class="sr-layout">
+          <aside class="sr-aside">
+            <div class="sr-aside-inner">
+              <div class="sr-aside-head">
+                <h2 data-i18n="topicsTitle">관심 주제</h2>
+                <span data-i18n="topicsWindow">최근 30일</span>
+              </div>
+              <div class="sr-topic-list" id="sr-topic-list">
+                <div class="sr-skel" style="height:32px;width:130px;flex-shrink:0"></div>
+                <div class="sr-skel" style="height:32px;width:110px;flex-shrink:0"></div>
+                <div class="sr-skel" style="height:32px;width:140px;flex-shrink:0"></div>
+                <div class="sr-skel" style="height:32px;width:100px;flex-shrink:0"></div>
+              </div>
+            </div>
+          </aside>
 
-      <div id="radar-topic-head" hidden>
-        <button class="secondary" id="radar-topic-back">← 트렌딩으로</button>
-        <span id="radar-topic-title" class="radar-topic-title"></span>
-        <span id="radar-topic-count" class="card-meta"></span>
-        <div class="radar-tabs" id="radar-topic-platforms">
-          <button data-tp="all" class="on">전체</button>
-          <button data-tp="claude">claude</button>
-          <button data-tp="chatgpt">chatgpt</button>
-          <button data-tp="gemini">gemini</button>
+          <main class="sr-main">
+            <div class="sr-topic-header" id="sr-topic-header" hidden>
+              <button class="sr-topic-back" id="sr-topic-back">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                <span data-i18n="backToTrending">트렌딩으로 돌아가기</span>
+              </button>
+              <div class="sr-topic-title-row">
+                <h2 class="sr-topic-title" id="sr-topic-title"></h2>
+                <span class="sr-topic-count" id="sr-topic-count"></span>
+              </div>
+              <div class="sr-topic-ptabs" id="sr-topic-ptabs">
+                <button data-tplatform="all" class="sr-tab-active">전체</button>
+                <button data-tplatform="claude">Claude</button>
+                <button data-tplatform="chatgpt">ChatGPT</button>
+                <button data-tplatform="gemini">Gemini</button>
+              </div>
+              <div class="sr-related" id="sr-related"></div>
+            </div>
+
+            <div id="sr-repo-view" hidden></div>
+            <div class="sr-grid" id="sr-grid"></div>
+            <div class="sr-empty" id="sr-empty" hidden>
+              <div class="sr-empty-icon">📡</div>
+              <p class="sr-empty-title" id="sr-empty-title">아직 수집된 데이터가 없습니다</p>
+              <p class="sr-empty-desc" id="sr-empty-desc">매일 KST 06:00 자동 수집되거나, 새로고침 버튼으로 수집을 시작하세요.</p>
+            </div>
+          </main>
         </div>
-        <div id="radar-related" class="radar-related"></div>
-      </div>
 
-      <div id="radar-filters">
-        <select id="radar-tax">
-          <option value="all">분류: 전체</option>
-        </select>
-        <label class="radar-minstars">최소 스타 <span id="radar-minstars-label">0</span>
-          <input type="range" id="radar-minstars" min="0" max="5000" step="100" value="0">
-        </label>
+        <footer class="sr-footer">
+          <span data-i18n="footerLeft">GitHub Search API · 일일 Top 10 · LLM 3줄 요약</span>
+          <span id="sr-updated"></span>
+        </footer>
       </div>
-
-      <div id="radar-grid" class="radar-grid"></div>
-      <div id="radar-empty" class="empty" hidden>데이터 없음</div>
-      <div id="radar-detail" hidden></div>
     </section>
 
     <!-- Runs -->
@@ -510,7 +734,7 @@ const badge = (s) => `<span class="badge ${esc(s)}">${esc(s)}</span>`;
 
 /* ── 뷰 전환 ── */
 const VIEWS = { gmail: loadGmail, coding: loadCoding, calendar: loadCalendar,
-                radar: loadRadar, runs: loadRuns };
+                radar: () => window.loadRadar && window.loadRadar(), runs: loadRuns };
 const loaded = {};
 document.querySelectorAll(".nav-item").forEach(b =>
   b.addEventListener("click", () => {
@@ -836,352 +1060,578 @@ async function reviewEvent(id, action, card) {
 }
 
 /* ── Skill Radar (skillRadar app.js 포팅) ── */
-const radar = {
-  platform: "claude", lang: "ko", period: "daily", date: "",
-  topic: null, topicPlatform: "all", taxFilter: "all", minStars: 0,
-  allTopics: [], lastItems: [],
+(() => {
+const $ = s => document.querySelector(s);
+const sr = {
+  platform: "claude", lang: "ko", date: "", topic: null, topicPlatform: "all",
+  period: "daily", taxFilter: "all", minStars: 0, view: "list",
+  lastItems: [], allTopics: [],
 };
-const TAX_LABELS = {
-  agents: "에이전트", mcp: "MCP", skills: "스킬", plugins: "플러그인",
-  devtools: "개발도구", automation: "자동화", data: "데이터", other: "기타",
+const grid = $("#sr-grid"), empty = $("#sr-empty"),
+      emptyTitle = $("#sr-empty-title"), emptyDesc = $("#sr-empty-desc"),
+      dateSelect = $("#sr-date"), updatedAt = $("#sr-updated"),
+      root = $("#sr-root"), repoView = $("#sr-repo-view"),
+      topicList = $("#sr-topic-list"), topicHeader = $("#sr-topic-header"),
+      relatedTopics = $("#sr-related"), topicTitle = $("#sr-topic-title"),
+      topicCount = $("#sr-topic-count"), topicBack = $("#sr-topic-back"),
+      topicPlatformTabs = $("#sr-topic-ptabs"), periodTabs = $("#sr-period-tabs"),
+      platformTabs = $("#sr-platform-tabs"), taxSelect = $("#sr-tax"),
+      minStarsRange = $("#sr-minstars"), minStarsLabel = $("#sr-minstars-label"),
+      dateWrap = $("#sr-date-wrap");
+
+/* ---- UI i18n (ko/en/zh) — skillRadar app.js와 동일 ---- */
+const I18N = {
+  ko: {
+    today: "오늘", noLicense: "라이선스 없음", updated: "업데이트",
+    subtitle: "AI skill · plugin trending", dateLabel: "기준일",
+    periodDaily: "일간", periodWeek: "주간", periodMonth: "월간",
+    topicsTitle: "관심 주제", topicsWindow: "최근 30일",
+    backToTrending: "트렌딩으로 돌아가기", refresh: "새로고침",
+    emptyTitle: "아직 수집된 데이터가 없습니다",
+    emptyDesc: "매일 KST 06:00 자동 수집되거나, 새로고침 버튼으로 수집을 시작하세요.",
+    topicNoRepos: "이 주제의 저장소가 없습니다",
+    topicNoReposDesc: "다른 주제를 선택하거나 트렌딩으로 돌아가세요.",
+    topicsEmpty: "주제 데이터가 없습니다",
+    topicsLoadFail: "주제를 불러오지 못했습니다",
+    loadFail: "데이터를 불러오지 못했습니다.",
+    filterTax: "분류", filterTaxAll: "전체", filterMinStars: "최소 스타",
+    appearancesShort: "회",
+    detailCollected: "수집일", detailPlatform: "플랫폼",
+    detailReadme: "README", detailSummary: "요약", detailRelated: "관련 주제",
+    detailNotFound: "수집된 저장소가 아닙니다",
+    topicCountFmt: "최근 30일 {count}개 저장소",
+    footerLeft: "GitHub Search API · 일일 Top 10 · LLM 3줄 요약",
+  },
+  en: {
+    today: "today", noLicense: "No license", updated: "Updated",
+    subtitle: "AI skill · plugin trending", dateLabel: "Date",
+    periodDaily: "Daily", periodWeek: "Weekly", periodMonth: "Monthly",
+    topicsTitle: "Topics", topicsWindow: "Last 30 days",
+    backToTrending: "Back to trending", refresh: "Refresh",
+    emptyTitle: "No data collected yet",
+    emptyDesc: "Collected daily at 06:00 KST, or press refresh to collect now.",
+    topicNoRepos: "No repos for this topic",
+    topicNoReposDesc: "Pick another topic or go back to trending.",
+    topicsEmpty: "No topic data",
+    topicsLoadFail: "Failed to load topics",
+    loadFail: "Failed to load data.",
+    filterTax: "Category", filterTaxAll: "All", filterMinStars: "Min stars",
+    appearancesShort: "×",
+    detailCollected: "Collected", detailPlatform: "Platform",
+    detailReadme: "README", detailSummary: "Summary", detailRelated: "Related topics",
+    detailNotFound: "Repo not found in collected data",
+    topicCountFmt: "{count} repos in last 30 days",
+    footerLeft: "GitHub Search API · Daily Top 10 · LLM 3-line summary",
+  },
+  zh: {
+    today: "今日", noLicense: "无许可证", updated: "更新于",
+    subtitle: "AI skill · plugin trending", dateLabel: "日期",
+    periodDaily: "每日", periodWeek: "每周", periodMonth: "每月",
+    topicsTitle: "关注主题", topicsWindow: "近30天",
+    backToTrending: "返回趋势", refresh: "刷新",
+    emptyTitle: "尚无收集数据",
+    emptyDesc: "每天 KST 06:00 自动收集，或点击刷新立即收集。",
+    topicNoRepos: "该主题暂无仓库",
+    topicNoReposDesc: "请选择其他主题或返回趋势页。",
+    topicsEmpty: "暂无主题数据",
+    topicsLoadFail: "主题加载失败",
+    loadFail: "数据加载失败。",
+    filterTax: "分类", filterTaxAll: "全部", filterMinStars: "最低星标",
+    appearancesShort: "次",
+    detailCollected: "收集日期", detailPlatform: "平台",
+    detailReadme: "README", detailSummary: "摘要", detailRelated: "相关主题",
+    detailNotFound: "未找到该仓库",
+    topicCountFmt: "近30天 {count} 个仓库",
+    footerLeft: "GitHub Search API · 每日 Top 10 · LLM 三行摘要",
+  },
+};
+function t(key) { return (I18N[sr.lang] && I18N[sr.lang][key]) || I18N.ko[key] || key; }
+function applyI18n() {
+  document.querySelectorAll("#view-radar [data-i18n]").forEach(el => {
+    el.textContent = t(el.dataset.i18n || "");
+  });
+}
+const ICON = {
+  star: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>',
+  trending: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>',
+  arrow: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>',
 };
 
-function radarEsc(s) { return esc(s ?? ""); }
-function radarStars(n) {
-  n = n || 0;
-  return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
+/* ---- 테마 (skillRadar와 동일: 기본 dark, localStorage 'sr-theme') ---- */
+const themeSun = $("#sr-theme-sun"), themeMoon = $("#sr-theme-moon");
+function isDark() { return !root.classList.contains("sr-light"); }
+function syncThemeIcon() {
+  const dark = isDark();
+  themeSun.style.display = dark ? "" : "none";
+  themeMoon.style.display = dark ? "none" : "";
 }
-function radarLicShort(l) {
-  const m = { "Apache-2.0": "Apache-2.0", "MIT": "MIT", "BSD-2-Clause": "BSD-2",
-    "BSD-3-Clause": "BSD-3", "GPL-3.0": "GPL-3", "GPL-2.0": "GPL-2",
-    "AGPL-3.0": "AGPL-3", "LGPL-3.0": "LGPL-3", "MPL-2.0": "MPL-2.0",
-    "ISC": "ISC", "Unlicense": "Unlicense", "0BSD": "0BSD", "CC0-1.0": "CC0" };
-  return m[l] || (l.length > 12 ? l.slice(0, 12) : l);
-}
-function radarPassFilters(i) {
-  if (radar.taxFilter !== "all" && i.taxonomy !== radar.taxFilter) return false;
-  if ((i.stars || 0) < radar.minStars) return false;
-  return true;
-}
-function radarSkeletons() {
-  $("#radar-grid").innerHTML = Array.from({ length: 6 }, () =>
-    `<div class="card radar-card" style="padding:16px"><div class="card-meta">로딩…</div></div>`).join("");
-  $("#radar-empty").hidden = true;
-}
-function radarShowList() {
-  $("#radar-grid").hidden = false;
-  $("#radar-empty").hidden = false;
-  $("#radar-detail").hidden = true;
-}
+const savedTheme = localStorage.getItem("sr-theme");
+if (savedTheme === "light") root.classList.add("sr-light");
+syncThemeIcon();
+$("#sr-theme-toggle").addEventListener("click", () => {
+  const light = root.classList.toggle("sr-light");
+  localStorage.setItem("sr-theme", light ? "light" : "dark");
+  syncThemeIcon();
+});
 
-function radarCard(i) {
-  const topics = (i.topics || []).slice(0, 4)
-    .map(t => `<span class="radar-topic-tag" data-t="${radarEsc(t)}">#${radarEsc(t)}</span>`).join("");
-  const delta = i.stars_today;
-  const deltaHtml = delta == null ? '<span class="card-meta">—</span>'
-    : delta > 0 ? `<span class="radar-badge up">+${radarStars(delta)}</span>`
-    : '<span class="card-meta">±0</span>';
-  const summary = (i.summary || []).map(l => `<li>${radarEsc(l)}</li>`).join("");
-  const badges = [
-    i.platform ? `<span class="radar-badge plat-${radarEsc(i.platform)}">${radarEsc(i.platform)}</span>` : "",
-    i.taxonomy ? `<span class="radar-badge tax">${radarEsc(TAX_LABELS[i.taxonomy] || i.taxonomy)}</span>` : "",
-    i.appearances > 1 ? `<span class="radar-badge">${i.appearances}회</span>` : "",
-    i.license ? `<span class="radar-badge lic">${radarEsc(radarLicShort(i.license))}</span>` : "",
-    i.language ? `<span class="radar-badge">${radarEsc(i.language)}</span>` : "",
-  ].join("");
-  return `<article class="card radar-card">
-    <div class="radar-card-head">
-      <span class="radar-rank">${i.rank || ""}</span>
-      <div style="min-width:0;flex:1">
-        <a class="radar-name" href="#" data-repo="${radarEsc(i.repo)}">${radarEsc(i.repo)}</a>
-        ${i.description ? `<p class="radar-desc">${radarEsc(i.description)}</p>` : ""}
-        <div class="radar-badges">${badges}</div>
-      </div>
-    </div>
-    ${summary ? `<ul class="radar-summary">${summary}</ul>` : ""}
-    <div class="radar-card-foot">
-      <div class="radar-topics-row">${topics}</div>
-      <span class="radar-stars">★${radarStars(i.stars)} ${deltaHtml}</span>
-    </div>
-    <div><a class="radar-gh" href="${radarEsc(i.url)}" target="_blank" rel="noopener">GitHub ↗</a></div>
-  </article>`;
+/* ---- 언어 토글 ---- */
+function setActiveLang(btn) {
+  document.querySelectorAll("#sr-lang-toggle button").forEach(b => {
+    const on = b === btn;
+    b.classList.toggle("sr-on", on);
+  });
 }
+document.querySelectorAll("#sr-lang-toggle button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    sr.lang = btn.dataset.lang || "ko";
+    setActiveLang(btn);
+    applyI18n();
+    if (sr.view === "repo") void loadRepoDetail();
+    else if (sr.period === "daily") void loadTrending();
+    else void loadRanking();
+  });
+});
 
-function radarRender() {
-  const items = radar.lastItems.filter(radarPassFilters);
-  const grid = $("#radar-grid"), empty = $("#radar-empty");
+/* ---- 플랫폼/기간/날짜 탭 ---- */
+platformTabs.querySelectorAll("button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    sr.platform = btn.dataset.platform || "claude";
+    platformTabs.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("sr-tab-active", b === btn));
+    void loadDates();
+    if (sr.period === "daily") void loadTrending(); else void loadRanking();
+  });
+});
+periodTabs.querySelectorAll("button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    sr.period = btn.dataset.period || "daily";
+    periodTabs.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("sr-tab-active", b === btn));
+    dateWrap.style.display = sr.period === "daily" ? "" : "none";
+    if (sr.period === "daily") void loadDates().then(loadTrending);
+    else void loadRanking();
+  });
+});
+dateSelect.addEventListener("change", () => {
+  sr.date = dateSelect.value;
+  if (sr.period === "daily") void loadTrending();
+});
+taxSelect.addEventListener("change", () => { sr.taxFilter = taxSelect.value; renderFiltered(); });
+minStarsRange.addEventListener("input", () => {
+  sr.minStars = Number(minStarsRange.value);
+  minStarsLabel.textContent = fmtStars(sr.minStars);
+  renderFiltered();
+});
+
+/* ---- 필터/렌더 ---- */
+function renderFiltered() {
+  const items = sr.lastItems.filter(passFilters);
   if (!items.length) {
     grid.innerHTML = "";
-    empty.textContent = radar.topic ? "이 주제의 저장소가 없습니다" : "데이터 없음";
+    emptyTitle.textContent = t("emptyTitle");
+    emptyDesc.textContent = t("emptyDesc");
     empty.hidden = false;
     return;
   }
   empty.hidden = true;
-  grid.innerHTML = items.map(radarCard).join("");
-  grid.querySelectorAll("[data-repo]").forEach(a =>
-    a.addEventListener("click", e => { e.preventDefault(); radarShowDetail(a.dataset.repo); }));
-  grid.querySelectorAll(".radar-topic-tag").forEach(t =>
-    t.addEventListener("click", () => radarSelectTopic(t.dataset.t, 0)));
+  grid.innerHTML = items.map(renderCard).join("");
+  bindCardClicks();
 }
-
-async function radarLoadTopics() {
-  try {
-    const d = await api("/radar/topics");
-    radar.allTopics = d.topics || [];
-    $("#radar-topics").innerHTML = radar.allTopics.slice(0, 30).map(t =>
-      `<button class="radar-chip${radar.topic === t.topic ? " on" : ""}" data-topic="${radarEsc(t.topic)}">#${radarEsc(t.topic)}<span class="cnt">${t.count}</span></button>`).join("");
-    $("#radar-topics").querySelectorAll(".radar-chip").forEach(b =>
-      b.addEventListener("click", () => {
-        const t = radar.allTopics.find(x => x.topic === b.dataset.topic);
-        radarSelectTopic(b.dataset.topic, t ? t.count : 0);
-      }));
-  } catch (e) { /* 토픽 실패는 무시 */ }
+function passFilters(item) {
+  if (sr.taxFilter !== "all" && item.taxonomy !== sr.taxFilter) return false;
+  if ((item.stars || 0) < sr.minStars) return false;
+  return true;
 }
-
-async function radarLoadDates() {
-  try {
-    const d = await api(`/radar/dates?platform=${radar.platform}`);
-    const sel = $("#radar-date");
-    sel.innerHTML = (d.dates || []).map(x => `<option value="${x}">${x}</option>`).join("");
-    if (d.dates && d.dates.length) { radar.date = d.dates[0]; sel.value = radar.date; }
-  } catch (e) { /* 무시 */ }
+function skeletons() {
+  grid.innerHTML = Array.from({ length: 6 }, () => `
+    <div class="sr-card">
+      <div class="sr-skel" style="height:16px;width:65%"></div>
+      <div class="sr-skel" style="height:12px;width:100%"></div>
+      <div class="sr-skel" style="height:12px;width:85%"></div>
+      <div class="sr-skel" style="height:34px;width:100%;border-radius:10px"></div>
+      <div style="display:flex;gap:8px">
+        <div class="sr-skel" style="height:20px;width:64px;border-radius:999px"></div>
+        <div class="sr-skel" style="height:20px;width:80px;border-radius:999px"></div>
+        <div class="sr-skel" style="height:20px;width:56px;border-radius:999px"></div>
+      </div>
+    </div>`).join("");
+  empty.hidden = true;
 }
-
-async function radarLoadTrending() {
-  radarSkeletons();
-  try {
-    const params = new URLSearchParams({ platform: radar.platform, lang: radar.lang });
-    if (radar.date) params.set("date", radar.date);
-    const d = await api(`/radar/trending?${params}`);
-    radar.lastItems = d.items || [];
-    radarRender();
-  } catch (e) {
-    $("#radar-grid").innerHTML = "";
-    $("#radar-empty").textContent = e.message;
-    $("#radar-empty").hidden = false;
-  }
+function fmtStars(n) {
+  n = n || 0;
+  return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
 }
-
-async function radarLoadRanking() {
-  radarSkeletons();
-  try {
-    const params = new URLSearchParams({
-      period: radar.period === "week" ? "week" : "month",
-      platform: radar.platform, lang: radar.lang });
-    const d = await api(`/radar/ranking?${params}`);
-    radar.lastItems = d.items || [];
-    radarRender();
-  } catch (e) {
-    $("#radar-grid").innerHTML = "";
-    $("#radar-empty").textContent = e.message;
-    $("#radar-empty").hidden = false;
-  }
+function licenseShort(license) {
+  const map = {
+    "Apache-2.0": "Apache-2.0", "MIT": "MIT", "BSD-2-Clause": "BSD-2",
+    "BSD-3-Clause": "BSD-3", "GPL-3.0": "GPL-3", "GPL-2.0": "GPL-2",
+    "AGPL-3.0": "AGPL-3", "LGPL-3.0": "LGPL-3", "MPL-2.0": "MPL-2.0",
+    "ISC": "ISC", "Unlicense": "Unlicense", "0BSD": "0BSD",
+    "CC0-1.0": "CC0", "EPL-2.0": "EPL-2", "BSL-1.0": "BSL",
+    "Elastic-2.0": "Elastic-2", "MS-PL": "MS-PL", "Zlib": "Zlib",
+    "WTFPL": "WTFPL", "Python-2.0": "PSF", "Artistic-2.0": "Artistic",
+  };
+  if (map[license]) return map[license];
+  const m = license.match(/^GPL-(\d+\.0)/);
+  if (m) return `GPL-${m[1]}`;
+  const b = license.match(/^BSD-(\d)-Clause/);
+  if (b) return `BSD-${b[1]}`;
+  return license.length > 12 ? license.slice(0, 12) : license;
 }
-
-function radarSelectTopic(topic, count) {
-  radar.topic = topic;
-  radar.topicPlatform = "all";
-  $("#radar-topic-head").hidden = false;
-  $("#radar-topic-title").textContent = `#${topic}`;
-  $("#radar-topic-count").textContent = count ? `최근 30일 ${count}개 저장소` : "";
-  $("#radar-topics").querySelectorAll(".radar-chip").forEach(b =>
-    b.classList.toggle("on", b.dataset.topic === topic));
-  radarSyncTopicPlatformTabs();
-  radarLoadTopicRepos();
-  radarLoadRelated(topic);
+function escapeHtml(s) {
+  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(s ?? "").replace(/[&<>"']/g, c => map[c]);
 }
-
-function radarClearTopic() {
-  radar.topic = null;
-  $("#radar-topic-head").hidden = true;
-  $("#radar-topics").querySelectorAll(".radar-chip").forEach(b => b.classList.remove("on"));
-  radarLoadTrending();
-}
-
-function radarSyncTopicPlatformTabs() {
-  $("#radar-topic-platforms").querySelectorAll("button").forEach(b =>
-    b.classList.toggle("on", b.dataset.tp === radar.topicPlatform));
-}
-
-async function radarLoadTopicRepos() {
-  if (!radar.topic) return;
-  radarSkeletons();
-  try {
-    const params = new URLSearchParams({
-      topic: radar.topic, platform: radar.topicPlatform,
-      lang: radar.lang, limit: "30" });
-    const d = await api(`/radar/topic-repos?${params}`);
-    radar.lastItems = d.items || [];
-    radarRender();
-  } catch (e) {
-    $("#radar-grid").innerHTML = "";
-    $("#radar-empty").textContent = e.message;
-    $("#radar-empty").hidden = false;
-  }
-}
-
-async function radarLoadRelated(topic) {
-  const el = $("#radar-related");
-  el.innerHTML = "";
-  try {
-    const d = await api(`/radar/related-topics?topic=${encodeURIComponent(topic)}`);
-    const rel = (d.related || []).filter(r => r.topic !== topic).slice(0, 8);
-    if (!rel.length) return;
-    rel.forEach(r => {
-      const b = document.createElement("button");
-      b.className = "radar-chip";
-      b.textContent = `#${r.topic}`;
-      b.addEventListener("click", () => {
-        const t = radar.allTopics.find(x => x.topic === r.topic);
-        radarSelectTopic(r.topic, t ? t.count : 0);
-      });
-      el.appendChild(b);
-    });
-  } catch (e) { /* 무시 */ }
-}
-
-async function radarShowDetail(repo) {
-  const el = $("#radar-detail");
-  $("#radar-grid").hidden = true;
-  $("#radar-empty").hidden = true;
-  $("#radar-topics").hidden = true;
-  $("#radar-topic-head").hidden = true;
-  $("#radar-filters").hidden = true;
-  el.hidden = false;
-  el.innerHTML = `<div class="card" style="padding:20px"><div class="card-meta">로딩…</div></div>`;
-  try {
-    const d = await api(`/radar/repo/${encodeURIComponent(repo)}?lang=${radar.lang}`);
-    const it = d.item;
-    const sums = it.summaries || {};
-    const langs = Object.keys(sums);
-    const langTabs = langs.map(lg =>
-      `<button data-lg="${lg}" class="${lg === radar.lang ? "on" : ""}">${lg === "ko" ? "한국어" : lg === "en" ? "English" : "中文"}</button>`).join("");
-    const panes = langs.map(lg =>
-      `<div class="radar-sum-pane" data-pane="${lg}" ${lg === radar.lang ? "" : "hidden"}><ul class="radar-summary">${(sums[lg] || []).map(l => `<li>${radarEsc(l)}</li>`).join("")}</ul></div>`).join("");
-    const badges = [
-      it.snapshot_platform ? `<span class="radar-badge plat-${radarEsc(it.snapshot_platform)}">${radarEsc(it.snapshot_platform)}</span>` : "",
-      it.taxonomy ? `<span class="radar-badge tax">${radarEsc(TAX_LABELS[it.taxonomy] || it.taxonomy)}</span>` : "",
-      it.language ? `<span class="radar-badge">${radarEsc(it.language)}</span>` : "",
-      it.license ? `<span class="radar-badge lic">${radarEsc(radarLicShort(it.license))}</span>` : "",
-      `<span class="radar-badge">★${radarStars(it.stars)}</span>`,
-      it.collected_date ? `<span class="radar-badge">수집 ${radarEsc(it.collected_date)}</span>` : "",
-    ].join("");
-    const readme = it.readme_excerpt
-      ? `<details class="radar-readme"><summary>README</summary><pre>${radarEsc(it.readme_excerpt)}</pre></details>` : "";
-    const related = (it.related_topics || []).length
-      ? `<div style="margin-top:14px"><h4 style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px">관련 주제</h4><div class="radar-topics-row">${it.related_topics.map(t => `<span class="radar-topic-tag" data-t="${radarEsc(t)}">#${radarEsc(t)}</span>`).join("")}</div></div>` : "";
-    el.innerHTML = `<div class="card" style="padding:20px">
-      <button class="radar-detail-back">← 목록으로</button>
-      <div class="radar-detail-head">
-        <div style="min-width:0">
-          <a class="radar-name" style="font-size:18px" href="${radarEsc(it.url)}" target="_blank" rel="noopener">${radarEsc(it.repo || repo)}</a>
-          ${it.description ? `<p class="radar-desc" style="-webkit-line-clamp:3">${radarEsc(it.description)}</p>` : ""}
-          <div class="radar-badges">${badges}</div>
+function renderCard(item) {
+  const topics = (item.topics || []).slice(0, 4)
+    .map(tp => `<span class="sr-chip-tag" data-topic="${escapeHtml(tp)}">#${escapeHtml(tp)}</span>`).join("");
+  const delta = item.stars_today;
+  const deltaInner = delta == null
+    ? '<span class="sr-today sr-flat">—</span>'
+    : delta > 0
+      ? `<span class="sr-today sr-up">${ICON.trending}+${fmtStars(delta)}</span>`
+      : '<span class="sr-today sr-flat">±0</span>';
+  const lines = (item.summary || [])
+    .map(l => `<li><span class="sr-lc3">${escapeHtml(l)}</span></li>`).join("");
+  const description = item.description
+    ? `<p class="sr-desc">${escapeHtml(item.description)}</p>` : "";
+  const repoName = item.repo_full_name || item.repo || "";
+  const repoUrl = item.repo_url || item.url || "";
+  return `
+  <article class="sr-card sr-fade-up">
+    <div class="sr-card-top">
+      <span class="sr-rank">${item.rank ?? ""}</span>
+      <div class="sr-card-main">
+        <a class="sr-repo-name" href="#" data-repo="${escapeHtml(repoName)}">${escapeHtml(repoName)}</a>
+        ${description}
+        <span class="sr-meta-row">
+          ${item.platform ? `<span class="sr-plat sr-plat-${escapeHtml(item.platform)}"><span class="sr-dot"></span>${escapeHtml(item.platform)}</span>` : ""}
+          ${item.taxonomy ? `<span class="sr-badge sr-tax">${escapeHtml(item.taxonomy)}</span>` : ""}
+          ${item.appearances && item.appearances > 1 ? `<span class="sr-badge sr-app">${item.appearances}${t("appearancesShort")}</span>` : ""}
+        </span>
+        <div class="sr-subrow">
+          ${item.license
+            ? `<span class="sr-badge sr-lic" title="License: ${escapeHtml(item.license)}">${escapeHtml(licenseShort(item.license))}</span>`
+            : `<span class="sr-badge">${t("noLicense")}</span>`}
+          ${item.language ? `<span class="sr-badge">${escapeHtml(item.language)}</span>` : ""}
+          <span class="sr-star">${ICON.star}<span>${fmtStars(item.stars)}</span></span>
+          <span>${t("today")} ${deltaInner}</span>
         </div>
-        <a class="radar-gh" href="${radarEsc(it.url)}" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
-      <div class="radar-detail-sum">
-        <h4>요약</h4>
-        <div class="radar-lang-tabs">${langTabs}</div>
-        ${panes}
-      </div>
-      ${readme}${related}
-    </div>`;
-    el.querySelector(".radar-detail-back").addEventListener("click", radarBackToList);
-    el.querySelectorAll(".radar-lang-tabs button").forEach(b =>
-      b.addEventListener("click", () => {
-        const lg = b.dataset.lg;
-        el.querySelectorAll(".radar-sum-pane").forEach(p => p.hidden = p.dataset.pane !== lg);
-        el.querySelectorAll(".radar-lang-tabs button").forEach(x => x.classList.toggle("on", x === b));
-      }));
-    el.querySelectorAll(".radar-topic-tag").forEach(t =>
-      t.addEventListener("click", () => {
-        const tp = t.dataset.t;
-        const cnt = (radar.allTopics.find(x => x.topic === tp) || {}).count || 0;
-        radarBackToList();
-        radarSelectTopic(tp, cnt);
-      }));
-  } catch (e) {
-    el.innerHTML = `<div class="card" style="padding:20px"><p style="color:var(--err)">수집된 저장소가 아닙니다</p><button class="radar-detail-back">← 목록으로</button></div>`;
-    el.querySelector(".radar-detail-back").addEventListener("click", radarBackToList);
+    </div>
+    ${lines ? `<ul class="sr-summary">${lines}</ul>` : ""}
+    <div class="sr-card-foot">
+      <div class="sr-chips">${topics}</div>
+      <a class="sr-gh-btn" href="${escapeHtml(repoUrl)}" target="_blank" rel="noopener">GitHub ${ICON.arrow}</a>
+    </div>
+  </article>`;
+}
+function bindCardClicks() {
+  grid.querySelectorAll("[data-repo]").forEach(a =>
+    a.addEventListener("click", e => { e.preventDefault(); void loadRepoDetailByName(a.dataset.repo); }));
+  grid.querySelectorAll(".sr-chip-tag").forEach(el =>
+    el.addEventListener("click", () => {
+      const tp = el.dataset.topic || "";
+      const found = sr.allTopics.find(x => x.topic === tp);
+      selectTopic(tp, found ? found.count : 0);
+    }));
+}
+function renderTopicRepos(data) {
+  sr.lastItems = data.items ?? [];
+  if (!sr.lastItems.length) {
+    grid.innerHTML = "";
+    emptyTitle.textContent = t("topicNoRepos");
+    emptyDesc.textContent = t("topicNoReposDesc");
+    empty.hidden = false;
+    return;
+  }
+  renderFiltered();
+}
+
+/* ---- 토픽 ---- */
+async function loadTopics() {
+  try {
+    const data = await api("/radar/topics");
+    const topics = data.topics ?? [];
+    sr.allTopics = topics;
+    if (!topics.length) {
+      topicList.innerHTML = `<p style="font-size:12px;color:var(--sr-faint);padding:8px 4px;margin:0">${t("topicsEmpty")}</p>`;
+      return;
+    }
+    topicList.innerHTML = topics.map(tp => `
+      <button class="sr-topic-btn${sr.topic === tp.topic ? " sr-on" : ""}" data-topic="${escapeHtml(tp.topic)}">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"># ${escapeHtml(tp.topic)}</span>
+        <span class="sr-topic-cnt">${tp.count}</span>
+      </button>`).join("");
+    topicList.querySelectorAll(".sr-topic-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const tp = btn.dataset.topic || "";
+        const found = sr.allTopics.find(x => x.topic === tp);
+        selectTopic(tp, found ? found.count : 0);
+      });
+    });
+  } catch {
+    topicList.innerHTML = `<p style="font-size:12px;color:var(--sr-faint);padding:8px 4px;margin:0">${t("topicsLoadFail")}</p>`;
+  }
+}
+function markActiveTopic(topic) {
+  topicList.querySelectorAll(".sr-topic-btn").forEach(b => {
+    const on = b.dataset.topic === topic;
+    b.classList.toggle("sr-on", on);
+  });
+}
+function selectTopic(topic, count) {
+  sr.topic = topic;
+  sr.topicPlatform = "all";
+  markActiveTopic(topic);
+  topicTitle.textContent = `#${topic}`;
+  topicCount.textContent = t("topicCountFmt").replace("{count}", String(count));
+  topicHeader.hidden = false;
+  repoView.hidden = true; sr.view = "list";
+  syncTopicPlatformTabs();
+  void loadTopicRepos();
+  void loadRelatedTopics(topic);
+}
+async function loadRelatedTopics(topic) {
+  relatedTopics.innerHTML = "";
+  try {
+    const data = await api(`/radar/related-topics?topic=${encodeURIComponent(topic)}`);
+    const related = (data.related ?? []).filter(r => r.topic !== topic).slice(0, 8);
+    if (!related.length) return;
+    const label = document.createElement("span");
+    label.className = "sr-related-label";
+    label.textContent = t("detailRelated");
+    relatedTopics.appendChild(label);
+    for (const r of related) {
+      const btn = document.createElement("button");
+      btn.className = "sr-rel-chip";
+      btn.textContent = `#${r.topic}`;
+      btn.addEventListener("click", () => {
+        const found = sr.allTopics.find(x => x.topic === r.topic);
+        selectTopic(r.topic, found ? found.count : 0);
+      });
+      relatedTopics.appendChild(btn);
+    }
+  } catch { /* 관련 주제 실패는 무시 */ }
+}
+function clearTopic() {
+  sr.topic = null;
+  markActiveTopic(null);
+  topicHeader.hidden = true;
+  void loadTrending();
+}
+function syncTopicPlatformTabs() {
+  topicPlatformTabs.querySelectorAll("button").forEach(b =>
+    b.classList.toggle("sr-tab-active", b.dataset.tplatform === sr.topicPlatform));
+}
+async function loadTopicRepos() {
+  if (!sr.topic) return;
+  skeletons();
+  try {
+    const params = new URLSearchParams({
+      topic: sr.topic, platform: sr.topicPlatform, lang: sr.lang, limit: "10",
+    });
+    const data = await api(`/radar/topic-repos?${params.toString()}`);
+    renderTopicRepos(data);
+  } catch {
+    grid.innerHTML = `<p class="sr-error">${t("loadFail")}</p>`;
+  }
+}
+topicBack.addEventListener("click", clearTopic);
+topicPlatformTabs.querySelectorAll("button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    sr.topicPlatform = btn.dataset.tplatform || "all";
+    syncTopicPlatformTabs();
+    void loadTopicRepos();
+  });
+});
+
+/* ---- 날짜/트렌딩/랭킹 ---- */
+async function loadDates() {
+  try {
+    const data = await api(`/radar/dates?platform=${sr.platform}`);
+    const dates = data.dates ?? [];
+    dateSelect.innerHTML = dates.length
+      ? dates.map(d => `<option value="${d}">${d}</option>`).join("")
+      : '<option value="">—</option>';
+    if (dates.length) {
+      sr.date = dates[0];
+      dateSelect.value = sr.date;
+    }
+  } catch { /* 날짜 목록 실패는 무시 */ }
+}
+async function loadTrending() {
+  skeletons();
+  try {
+    const params = new URLSearchParams({ platform: sr.platform, lang: sr.lang });
+    if (sr.date) params.set("date", sr.date);
+    const data = await api(`/radar/trending?${params.toString()}`);
+    sr.lastItems = data.items ?? [];
+    if (!sr.lastItems.length) {
+      grid.innerHTML = "";
+      emptyTitle.textContent = t("emptyTitle");
+      emptyDesc.textContent = t("emptyDesc");
+      empty.hidden = false;
+      return;
+    }
+    renderFiltered();
+    updatedAt.textContent = `${t("updated")} ${new Date().toLocaleString("ko-KR")}`;
+  } catch {
+    grid.innerHTML = `<p class="sr-error">${t("loadFail")}</p>`;
+  }
+}
+async function loadRanking() {
+  skeletons();
+  try {
+    const params = new URLSearchParams({
+      period: sr.period === "week" ? "week" : "month",
+      platform: sr.platform, lang: sr.lang,
+    });
+    const data = await api(`/radar/ranking?${params.toString()}`);
+    sr.lastItems = data.items ?? [];
+    if (!sr.lastItems.length) {
+      grid.innerHTML = "";
+      emptyTitle.textContent = t("emptyTitle");
+      emptyDesc.textContent = t("emptyDesc");
+      empty.hidden = false;
+      return;
+    }
+    renderFiltered();
+    updatedAt.textContent = `${t("updated")} ${new Date().toLocaleString("ko-KR")}`;
+  } catch {
+    grid.innerHTML = `<p class="sr-error">${t("loadFail")}</p>`;
   }
 }
 
-function radarBackToList() {
-  $("#radar-detail").hidden = true;
-  $("#radar-grid").hidden = false;
-  $("#radar-empty").hidden = false;
-  $("#radar-topics").hidden = false;
-  $("#radar-topic-head").hidden = radar.topic == null;
-  $("#radar-filters").hidden = false;
-  if (radar.topic) radarLoadTopicRepos(); else radarLoadTrending();
+/* ---- 저장소 상세 뷰 (인페이지) ---- */
+let currentRepo = "";
+async function loadRepoDetailByName(name) {
+  currentRepo = name;
+  sr.view = "repo";
+  grid.style.display = "none";
+  empty.hidden = true;
+  topicHeader.hidden = true;
+  repoView.hidden = false;
+  repoView.innerHTML = '<div class="sr-skel" style="height:32px;width:50%;margin-bottom:16px"></div><div class="sr-skel" style="height:14px;width:100%;margin-bottom:8px"></div><div class="sr-skel" style="height:14px;width:85%"></div>';
+  await loadRepoDetail();
 }
-
-function radarSyncTaxFilter() {
-  const sel = $("#radar-tax");
-  const labels = Object.keys(TAX_LABELS);
-  sel.innerHTML = `<option value="all">분류: 전체</option>` +
-    labels.map(t => `<option value="${t}">${TAX_LABELS[t]}</option>`).join("");
-  sel.value = radar.taxFilter;
-}
-
-async function loadRadar() {
-  radarSyncTaxFilter();
-  await radarLoadTopics();
-  await radarLoadDates();
-  if (radar.period === "daily") radarLoadTrending(); else radarLoadRanking();
-}
-function refreshRadar() {
-  if (radar.topic) radarLoadTopicRepos();
-  else if (radar.period === "daily") radarLoadTrending();
-  else radarLoadRanking();
-}
-
-$("#radar-period").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return;
-  radar.period = b.dataset.p;
-  $("#radar-period").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
-  $("#radar-date").hidden = radar.period !== "daily";
-  $("#radar-topic-head").hidden = true; radar.topic = null;
-  if (radar.period === "daily") radarLoadDates().then(radarLoadTrending);
-  else radarLoadRanking();
-});
-$("#radar-platform").addEventListener("change", e => {
-  radar.platform = e.target.value;
-  if (radar.period === "daily") radarLoadDates().then(radarLoadTrending);
-  else radarLoadRanking();
-});
-$("#radar-lang").addEventListener("change", e => {
-  radar.lang = e.target.value; refreshRadar();
-});
-$("#radar-date").addEventListener("change", e => {
-  radar.date = e.target.value; radarLoadTrending();
-});
-$("#radar-tax").addEventListener("change", e => {
-  radar.taxFilter = e.target.value; radarRender();
-});
-$("#radar-minstars").addEventListener("input", e => {
-  radar.minStars = Number(e.target.value);
-  $("#radar-minstars-label").textContent = radarStars(radar.minStars);
-  radarRender();
-});
-$("#radar-topic-back").addEventListener("click", radarClearTopic);
-$("#radar-topic-platforms").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return;
-  radar.topicPlatform = b.dataset.tp;
-  radarSyncTopicPlatformTabs();
-  radarLoadTopicRepos();
-});
-$("#radar-refresh").addEventListener("click", async () => {
-  const st = $("#radar-status");
-  st.textContent = "수집 시작 중…";
+async function loadRepoDetail() {
+  if (!currentRepo) {
+    sr.view = "list";
+    repoView.hidden = true;
+    grid.style.display = "";
+    return;
+  }
   try {
-    const r = await api("/radar/refresh", {method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({platforms: [radar.platform], force: true})});
-    st.textContent = `수집 run 시작: ${r.run_ids.join(",")} — 실행 이력에서 승인 후 발행됩니다`;
+    const data = await api(`/radar/repo/${encodeURIComponent(currentRepo)}?lang=${sr.lang}`);
+    const it = data.item;
+    const badgeMeta = `
+      <div class="sr-detail-meta">
+        ${it.snapshot_platform ? `<span class="sr-badge sr-plat-${escapeHtml(it.snapshot_platform)} sr-plat"><span class="sr-dot"></span>${escapeHtml(it.snapshot_platform)}</span>` : ""}
+        ${it.collected_date ? `<span>${t("detailCollected")} ${escapeHtml(it.collected_date)}</span>` : ""}
+        ${it.taxonomy ? `<span class="sr-badge sr-tax">${escapeHtml(it.taxonomy)}</span>` : ""}
+        ${it.language ? `<span class="sr-badge">${escapeHtml(it.language)}</span>` : ""}
+        <span class="sr-star">${ICON.star}<span>${fmtStars(it.stars)}</span></span>
+        ${it.license ? `<span class="sr-badge sr-lic">${escapeHtml(licenseShort(it.license))}</span>` : `<span class="sr-badge">${t("noLicense")}</span>`}
+        ${it.appearances && it.appearances > 1 ? `<span class="sr-badge sr-app">${it.appearances}${t("appearancesShort")}</span>` : ""}
+      </div>`;
+    const summaryLangs = it.summaries ?? {};
+    const langBtns = Object.keys(summaryLangs).map(lg => {
+      const label = lg === "ko" ? "한국어" : lg === "en" ? "English" : "中文";
+      return `<button class="sr-lang-btn${lg === sr.lang ? " sr-on" : ""}" data-lang="${lg}">${label}</button>`;
+    }).join("");
+    const summaryHtml = lg => `
+      <div class="sr-sum-pane${lg === sr.lang ? "" : ""}" data-pane="${lg}" ${lg === sr.lang ? "" : "hidden"}>
+        <ul>${(summaryLangs[lg] ?? []).map(l => `<li><span>${escapeHtml(l)}</span></li>`).join("")}</ul>
+      </div>`;
+    const readme = it.readme_excerpt
+      ? `<details class="sr-readme"><summary>${t("detailReadme")}</summary><pre>${escapeHtml(it.readme_excerpt)}</pre></details>`
+      : "";
+    const related = (it.related_topics ?? []).length
+      ? `<div style="margin-top:20px"><h3 style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--sr-faint);margin:0 0 10px">${t("detailRelated")}</h3><div class="sr-related" style="margin-top:0">${it.related_topics.map(tp => `<button class="sr-rel-chip" data-topic="${escapeHtml(tp)}">#${escapeHtml(tp)}</button>`).join("")}</div></div>`
+      : "";
+    repoView.innerHTML = `
+      <button class="sr-topic-back" id="sr-repo-back" style="margin-bottom:12px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        ${t("backToTrending")}
+      </button>
+      <article class="sr-detail-card sr-fade-up">
+        <div class="sr-detail-head">
+          <div style="min-width:0;flex:1">
+            <a class="sr-detail-name" href="${escapeHtml(it.repo_url || it.url || "")}" target="_blank" rel="noopener">${escapeHtml(it.repo_full_name || it.repo || currentRepo)}</a>
+            ${it.description ? `<p class="sr-desc" style="-webkit-line-clamp:3">${escapeHtml(it.description)}</p>` : ""}
+            ${badgeMeta}
+          </div>
+          <a class="sr-gh-btn" href="${escapeHtml(it.repo_url || it.url || "")}" target="_blank" rel="noopener">GitHub ${ICON.arrow}</a>
+        </div>
+        <div class="sr-detail-sum">
+          <h3>${t("detailSummary")}</h3>
+          <div class="sr-lang-tabs">${langBtns}</div>
+          ${Object.keys(summaryLangs).map(summaryHtml).join("")}
+        </div>
+        ${readme}${related}
+      </article>`;
+    $("#sr-repo-back").addEventListener("click", () => {
+      sr.view = "list"; currentRepo = "";
+      repoView.hidden = true;
+      grid.style.display = "";
+      topicHeader.hidden = sr.topic == null;
+      if (sr.topic) void loadTopicRepos();
+      else if (sr.period === "daily") void loadTrending();
+      else void loadRanking();
+    });
+    repoView.querySelectorAll(".sr-lang-btn").forEach(b => {
+      b.addEventListener("click", () => {
+        const lg = b.dataset.lang || sr.lang;
+        repoView.querySelectorAll(".sr-sum-pane").forEach(p =>
+          p.hidden = p.dataset.pane !== lg);
+        repoView.querySelectorAll(".sr-lang-btn").forEach(x =>
+          x.classList.toggle("sr-on", x === b));
+      });
+    });
+    repoView.querySelectorAll(".sr-rel-chip").forEach(b => {
+      b.addEventListener("click", () => {
+        const tp = b.dataset.topic || "";
+        const found = sr.allTopics.find(x => x.topic === tp);
+        sr.view = "list"; currentRepo = "";
+        repoView.hidden = true; grid.style.display = "";
+        selectTopic(tp, found ? found.count : 0);
+      });
+    });
+  } catch {
+    repoView.innerHTML = `<p class="sr-error">${t("detailNotFound")}</p>
+      <button class="sr-topic-back" id="sr-repo-back" style="margin-top:12px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        ${t("backToTrending")}</button>`;
+    $("#sr-repo-back").addEventListener("click", () => {
+      sr.view = "list"; currentRepo = "";
+      repoView.hidden = true; grid.style.display = "";
+      if (sr.period === "daily") void loadTrending(); else void loadRanking();
+    });
+  }
+}
+
+/* ---- 초기화 / 새로고침 ---- */
+minStarsLabel.textContent = fmtStars(sr.minStars);
+applyI18n();
+async function loadRadar() {
+  await loadTopics();
+  await loadDates();
+  if (sr.period === "daily") await loadTrending(); else await loadRanking();
+}
+$("#sr-refresh").addEventListener("click", async () => {
+  const st = $("#sr-status");
+  st.textContent = "수집 run 시작 중…";
+  try {
+    const r = await api("/radar/refresh", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({platforms: ["claude", "chatgpt", "gemini"], force: true})});
+    st.textContent = `run ${r.run_ids.join(",")} — 실행 이력에서 승인 후 발행됩니다`;
   } catch (e) { st.textContent = e.message; }
 });
+// loadRadar는 VIEWS에서 호출되도록 전역에 노출
+window.loadRadar = loadRadar;
+})();
 
 /* ── Runs ── */
 async function loadRuns() { refreshRuns(); }

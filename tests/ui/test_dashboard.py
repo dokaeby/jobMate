@@ -116,7 +116,8 @@ def _open_view(page: Page, view: str, title: str) -> None:
     page.click(f'.nav-item[data-view="{view}"]')
     section = page.locator(f"#view-{view}")
     assert section.is_visible()
-    assert page.locator(f"#view-{view} .page-title").inner_text() == title
+    title_sel = ".sr-title" if view == "radar" else ".page-title"
+    assert page.locator(f"#view-{view} {title_sel}").inner_text() == title
 
 
 def test_sidebar_navigation(page: Page) -> None:
@@ -125,7 +126,7 @@ def test_sidebar_navigation(page: Page) -> None:
         ("gmail", "Gmail Checker"),
         ("coding", "코딩 에이전트"),
         ("calendar", "Calendar"),
-        ("radar", "Skill Radar"),
+        ("radar", "SkillRadar"),
         ("runs", "실행"),
     ]:
         _open_view(page, view, title)
@@ -151,8 +152,8 @@ def test_calendar_view_empty_state(page: Page) -> None:
 
 def test_radar_view_platforms(page: Page) -> None:
     page.click('.nav-item[data-view="radar"]')
-    options = page.locator("#radar-platform option").all_inner_texts()
-    assert options == ["claude", "chatgpt", "gemini"]
+    labels = page.locator("#sr-platform-tabs button").all_inner_texts()
+    assert labels == ["Claude", "ChatGPT", "Gemini"]
 
 
 def test_runs_view_table(page: Page) -> None:
