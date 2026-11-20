@@ -10,6 +10,8 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -21,12 +23,32 @@ from playwright.sync_api import Page, sync_playwright
 
 from jobmate.api.app import create_app
 from jobmate.config import Settings
+from jobmate.llm import FakeLLM
 from jobmate.store.db import Store
 
 
+def _ui_llm_handler(system: str, user: str, model: Any, schema: Any) -> dict[str, Any]:
+    """결정적 코딩 에이전트 LLM.
+
+    - "SLOWLOOP" 태스크: 매 스텝 0.4s 지연 + ls만 반복 → 취소 테스트용 장기 실행
+    - 그 외: write_file 1스텝 후 final → 빠른 done 경로
+    """
+    if "SLOWLOOP" in user:
+        time.sleep(0.4)
+        return {"action": "tool", "thought": "폴링", "tool": "ls", "args": {"path": "."}}
+    if "STEPS SO FAR" in user:
+        return {"action": "final", "answer": "UI 테스트 답변"}
+    return {
+        "action": "tool",
+        "thought": "파일 생성",
+        "tool": "write_file",
+        "args": {"path": "ui-check.txt", "content": "ok"},
+    }
+
+
 @pytest.fixture(scope="module")
-def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """격리된 임시 DB로 실제 uvicorn 서버를 띄운다."""
+def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespace]:
+    """격리된 임시 DB + FakeLLM으로 실제 uvicorn 서버를 띄운다."""
     tmp = tmp_path_factory.mktemp("ui")
     settings = Settings(
         db_path=tmp / "jm.db",
@@ -36,7 +58,8 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         coding_tool="none",
     )
     store = Store(str(settings.db_path))
-    app = create_app(settings=settings, store=store, llm=None, adapters={})
+    llm = FakeLLM(_ui_llm_handler)
+    app = create_app(settings=settings, store=store, llm=llm, adapters={})
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -51,17 +74,22 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             break
         time.sleep(0.05)
     httpx.get(url + "/api/v1/health", timeout=2)
-    yield url
+    yield SimpleNamespace(url=url, store=store)
     server.should_exit = True
     thread.join(timeout=5)
 
 
+@pytest.fixture(scope="module")
+def base_url(ui_server: SimpleNamespace) -> str:
+    return ui_server.url
+
+
 @pytest.fixture()
-def page(base_url: str) -> Iterator[Page]:
+def page(ui_server: SimpleNamespace) -> Iterator[Page]:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         pg = browser.new_page()
-        pg.goto(base_url)
+        pg.goto(ui_server.url)
         pg.wait_for_selector(".nav-item")
         yield pg
         browser.close()
@@ -156,3 +184,87 @@ def test_push_toggle_without_vapid(page: Page) -> None:
     page.wait_for_timeout(1000)
     assert any("VAPID" in m or "지원" in m for m in messages)
     assert page.locator("#push-toggle").is_visible()
+
+
+# ---------- 코딩 에이전트 실행 흐름 ----------
+
+
+def _open_coding(page: Page) -> None:
+    page.click('.nav-item[data-view="coding"]')
+    page.wait_for_function("document.querySelectorAll('#coding-tool option').length > 0")
+
+
+def _run_agent_task(page: Page, task: str) -> None:
+    page.fill("#coding-task", task)
+    page.click("#coding-run")
+
+
+def test_coding_run_streams_to_done(page: Page) -> None:
+    """실행 → SSE 스트림 → 완료 상태/답변/스텝 렌더링."""
+    _open_coding(page)
+    _run_agent_task(page, "ui-check.txt 파일을 만들어줘")
+    _wait_text(page, "#coding-status", "완료")
+    _wait_text(page, "#coding-result", "UI 테스트 답변")
+    _wait_text(page, "#coding-result", "에이전트 스텝")
+    # 완료 후 취소 버튼은 숨겨진다
+    assert page.locator("#coding-cancel").is_hidden()
+
+
+def test_coding_run_sse_fallback_polling(page: Page) -> None:
+    """SSE 스트림이 실패하면 폴링 폴백으로도 완료 상태에 도달한다."""
+    page.route("**/api/v1/coding/jobs/*/events", lambda route: route.abort())
+    _open_coding(page)
+    _run_agent_task(page, "폴백 경로 테스트")
+    _wait_text(page, "#coding-status", "완료")
+    _wait_text(page, "#coding-result", "UI 테스트 답변")
+
+
+def test_coding_cancel_running_job(page: Page) -> None:
+    """실행 중 취소 버튼 → cancel_requested → cancelled 상태 표시."""
+    _open_coding(page)
+    _run_agent_task(page, "SLOWLOOP 계속 실행해줘")
+    _wait_text(page, "#coding-status", "실행 중")
+    page.click("#coding-cancel")
+    _wait_text(page, "#coding-status", "취소됨")
+    assert page.locator("#coding-cancel").is_hidden()
+
+
+def test_coding_recent_jobs_click_loads_result(ui_server: SimpleNamespace, page: Page) -> None:
+    """최근 작업 목록의 완료 job 카드를 클릭하면 저장된 결과가 렌더링된다."""
+    store = ui_server.store
+    jid = "uihist0001"
+    now = "2025-01-01T00:00:00+00:00"
+    with store.tx() as c:
+        c.execute(
+            "INSERT INTO coding_jobs(id,engine,tool,model,task,workspace,status,ok,"
+            " text,answer,steps,diff,error,attempts,max_attempts,created_at,updated_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                jid,
+                "agent",
+                "agent",
+                "",
+                "이전 완료 작업",
+                "workspace-dir",
+                "done",
+                1,
+                "저장된 출력",
+                "저장된 답변",
+                '[{"step":1,"thought":"생각","tool":"write_file",'
+                '"args":{"path":"a.txt"},"result":"wrote"}]',
+                "diff --git a/a.txt b/a.txt",
+                "",
+                1,
+                2,
+                now,
+                now,
+            ),
+        )
+    _open_coding(page)
+    card = page.locator(f'#coding-jobs [data-job="{jid}"]')
+    card.wait_for(timeout=5000)
+    card.click()
+    _wait_text(page, "#coding-status", "불러옴")
+    _wait_text(page, "#coding-result", "저장된 답변")
+    _wait_text(page, "#coding-result", "에이전트 스텝")
+    _wait_text(page, "#coding-result", "diff --git")

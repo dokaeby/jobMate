@@ -52,6 +52,8 @@ class CodingJobWorker:
         self._dispatch_thread: threading.Thread | None = None
         self._active: dict[str, threading.Thread] = {}
         self._active_lock = threading.Lock()
+        self._lease_lost: set[str] = set()
+        self._lease_lock = threading.Lock()
 
     # ---- lifecycle ----
     def start(self) -> None:
@@ -128,15 +130,30 @@ class CodingJobWorker:
             hb.join(timeout=5)
             with self._active_lock:
                 self._active.pop(job_id, None)
+            with self._lease_lock:
+                self._lease_lost.discard(job_id)
 
     def _heartbeat(self, job_id: str, stop: threading.Event) -> None:
         interval = max(1.0, self._lease_seconds / 3)
         while not stop.wait(interval):
             try:
                 if not self._store.renew_coding_lease(job_id, self._owner, self._lease_seconds):
+                    with self._lease_lock:
+                        self._lease_lost.add(job_id)
                     return  # lease 상실 — 다른 워커가 회수했거나 job 종료
             except Exception:
                 return
+
+    def _lost(self, job_id: str) -> bool:
+        with self._lease_lock:
+            return job_id in self._lease_lost
+
+    def _lease_lost_log(self, job_id: str) -> None:
+        import logging
+
+        logging.getLogger("jobmate.coding_worker").warning(
+            "coding job %s: lease lost — fenced write skipped", job_id
+        )
 
     # ---- execution ----
     def _workspace(self, job_id: str, custom: str) -> str:
@@ -186,7 +203,9 @@ class CodingJobWorker:
         job = self._store.get_coding_job(job_id)
         if job is None or job.get("status") != "running":
             return
-        cancel_check = lambda: self._store.coding_job_cancel_requested(job_id)  # noqa: E731
+        cancel_check = lambda: (  # noqa: E731
+            self._store.coding_job_cancel_requested(job_id) or self._lost(job_id)
+        )
         engine = str(job.get("engine") or "")
         try:
             cwd = self._workspace(job_id, str(job.get("workspace") or ""))
@@ -201,7 +220,7 @@ class CodingJobWorker:
         job_id = str(job["id"])
 
         def on_step(steps: list[dict[str, Any]]) -> None:
-            self._store.update_coding_job(job_id, steps=steps)
+            self._store.update_coding_job(job_id, owner=self._owner, steps=steps)
 
         res = CodingAgent(self._llm, self._settings).run(
             str(job.get("task") or ""),
@@ -216,19 +235,27 @@ class CodingJobWorker:
             if res["status"] == "done"
             else ("cancelled" if res["status"] == "cancelled" else "failed")
         )
-        self._store.update_coding_job(
-            job_id,
-            status=status if status != "failed" else "running",
-            ok=status == "done",
-            text=res["answer"],
-            answer=res["answer"],
-            steps=res["steps"],
-            diff=workspace_diff(cwd),
-            workspace=cwd,
-            error=res["error"] or ("" if status == "done" else res["status"]),
-            lease_owner="",
-            lease_expires_at=None,
-        )
+        fields: dict[str, Any] = {
+            "ok": status == "done",
+            "text": res["answer"],
+            "answer": res["answer"],
+            "steps": res["steps"],
+            "diff": workspace_diff(cwd),
+            "workspace": cwd,
+            "error": res["error"] or ("" if status == "done" else res["status"]),
+        }
+        if status == "failed":
+            # 부분 결과만 lease 보유 상태로 기록 — 상태 전이는 retry가 담당
+            if not self._store.update_coding_job(job_id, owner=self._owner, **fields):
+                self._lease_lost_log(job_id)
+                return
+        else:
+            fields["status"] = status
+            fields["lease_owner"] = ""
+            fields["lease_expires_at"] = None
+            if not self._store.update_coding_job(job_id, owner=self._owner, **fields):
+                self._lease_lost_log(job_id)
+                return
         self._store.audit(
             "",
             "tool:agent",
@@ -256,18 +283,25 @@ class CodingJobWorker:
         )
         cancelled = res.exit_code == -15 or cancel_check()
         status = "cancelled" if cancelled else ("done" if res.ok else "failed")
-        self._store.update_coding_job(
-            job_id,
-            status=status if status != "failed" else "running",
-            ok=not cancelled and res.ok,
-            text=res.text,
-            diff=res.diff,
-            workspace=cwd,
-            exit_code=res.exit_code,
-            error="cancelled by user" if cancelled else ("" if res.ok else res.text[-300:]),
-            lease_owner="",
-            lease_expires_at=None,
-        )
+        fields: dict[str, Any] = {
+            "ok": not cancelled and res.ok,
+            "text": res.text,
+            "diff": res.diff,
+            "workspace": cwd,
+            "exit_code": res.exit_code,
+            "error": "cancelled by user" if cancelled else ("" if res.ok else res.text[-300:]),
+        }
+        if status == "failed":
+            if not self._store.update_coding_job(job_id, owner=self._owner, **fields):
+                self._lease_lost_log(job_id)
+                return
+        else:
+            fields["status"] = status
+            fields["lease_owner"] = ""
+            fields["lease_expires_at"] = None
+            if not self._store.update_coding_job(job_id, owner=self._owner, **fields):
+                self._lease_lost_log(job_id)
+                return
         self._store.audit(
             "",
             f"tool:{res.tool}",
@@ -280,13 +314,16 @@ class CodingJobWorker:
 
     def _finish_failure(self, job_id: str, error: str, *, cancelled: bool) -> None:
         if cancelled:
-            self._store.update_coding_job(
+            wrote = self._store.update_coding_job(
                 job_id,
+                owner=self._owner,
                 status="cancelled",
                 error="cancelled by user",
                 lease_owner="",
                 lease_expires_at=None,
             )
+            if not wrote:
+                self._lease_lost_log(job_id)
             return
         self._retry_or_fail(job_id, error)
 
@@ -294,7 +331,12 @@ class CodingJobWorker:
         job = self._store.get_coding_job(job_id) or {}
         attempts = int(job.get("attempts") or 1)
         delay = min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * (2 ** max(0, attempts - 1)))
-        final = self._store.schedule_coding_retry(job_id, delay_seconds=delay, error=error)
+        final = self._store.schedule_coding_retry(
+            job_id, delay_seconds=delay, error=error, owner=self._owner
+        )
+        if final == "lost":
+            self._lease_lost_log(job_id)
+            return
         import logging
 
         logging.getLogger("jobmate.coding_worker").warning(

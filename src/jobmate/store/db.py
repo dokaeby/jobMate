@@ -1580,11 +1580,21 @@ class Store:
             )
             return cur.rowcount > 0
 
-    def schedule_coding_retry(self, job_id: str, *, delay_seconds: int, error: str) -> str:
-        """실패한 job을 재큐 또는 최종 failed로 전이. 반환: 'queued'|'failed'."""
+    def schedule_coding_retry(
+        self,
+        job_id: str,
+        *,
+        delay_seconds: int,
+        error: str,
+        owner: str | None = None,
+    ) -> str:
+        """실패한 job을 재큐 또는 최종 failed로 전이.
+
+        반환: 'queued'|'failed'|'lost'(owner 불일치/행 없음).
+        """
         job = self.get_coding_job(job_id)
         if job is None:
-            return "failed"
+            return "lost"
         attempts = int(job.get("attempts") or 0)
         max_attempts = int(job.get("max_attempts") or 1)
         now = _now()
@@ -1594,28 +1604,38 @@ class Store:
         else:
             status = "failed"
             nxt = None
+        sql = (
+            "UPDATE coding_jobs SET status=?, next_run_at=?, error=?,"
+            " lease_owner='', lease_expires_at=NULL, updated_at=? WHERE id=?"
+        )
+        params: list[Any] = [status, nxt, error[:500], _iso(now), job_id]
+        if owner is not None:
+            sql += " AND lease_owner=?"
+            params.append(owner)
         with self.tx() as c:
-            c.execute(
-                "UPDATE coding_jobs SET status=?, next_run_at=?, error=?,"
-                " lease_owner='', lease_expires_at=NULL, updated_at=?"
-                " WHERE id=?",
-                (status, nxt, error[:500], _iso(now), job_id),
-            )
-        return status
+            cur = c.execute(sql, params)
+        return status if cur.rowcount > 0 else "lost"
 
-    def update_coding_job(self, job_id: str, **fields: Any) -> None:
+    def update_coding_job(self, job_id: str, *, owner: str | None = None, **fields: Any) -> bool:
+        """job 갱신. owner 지정 시 lease_owner 일치할 때만 씀(fencing).
+
+        반환: 갱신된 행이 있으면 True, lease 상실/행 없음이면 False.
+        """
         sets = {k: v for k, v in fields.items() if k in self._CODING_JOB_FIELDS}
         if "steps" in fields:
             sets["steps"] = json.dumps(fields["steps"], ensure_ascii=False)
         if not sets:
-            return
+            return True
         sets["updated_at"] = _iso(_now())
         cols = ", ".join(f"{k}=?" for k in sets)
+        sql = f"UPDATE coding_jobs SET {cols} WHERE id=?"  # noqa: S608 - cols는 화이트리스트 필드명만 사용
+        params: list[Any] = [*sets.values(), job_id]
+        if owner is not None:
+            sql += " AND lease_owner=?"
+            params.append(owner)
         with self.tx() as c:
-            c.execute(
-                f"UPDATE coding_jobs SET {cols} WHERE id=?",  # noqa: S608 - cols는 화이트리스트 필드명만 사용
-                (*sets.values(), job_id),
-            )
+            cur = c.execute(sql, params)
+        return cur.rowcount > 0
 
     def cancel_coding_job(self, job_id: str) -> str:
         """queued는 즉시 cancelled, running은 cancel_requested 플래그.

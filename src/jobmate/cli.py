@@ -47,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("workflows", help="등록된 워크플로 목록")
 
+    sp = sub.add_parser(
+        "coding-worker",
+        help="코딩 job 큐를 소비하는 상주 워커 — API 서버와 분리된 프로세스/Vercel 외부 실행용",
+    )
+
     sp = sub.add_parser("google-auth", help="Google OAuth 토큰 발급 (gmail/calendar)")
     sp.add_argument("kind", choices=["gmail", "calendar"])
     sp.add_argument(
@@ -70,6 +75,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "workflows":
         for w in WORKFLOWS.values():
             print(f"{w.key} v{w.version}")
+        return 0
+
+    if args.cmd == "coding-worker":
+        import signal
+        import threading
+
+        from .coding_worker import CodingJobWorker
+
+        worker = CodingJobWorker(store, settings, llm)
+        worker.start()
+        print(f"coding-worker started (owner={worker.owner})", flush=True)
+        stop = threading.Event()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, lambda *_: stop.set())
+        stop.wait()
+        worker.stop()
+        print("coding-worker stopped", flush=True)
         return 0
 
     if args.cmd == "google-auth":

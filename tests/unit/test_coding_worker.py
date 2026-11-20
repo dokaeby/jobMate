@@ -126,6 +126,56 @@ def test_dispatch_once_picks_due_jobs(tmp_path: Path):
     assert job["status"] == "done"
 
 
+def test_fenced_update_and_retry(tmp_path: Path):
+    """owner 불일치 write/retry는 'lost' — stale worker가 상태를 덮지 못한다."""
+    _, store = _env(tmp_path)
+    store.create_coding_job("jf", engine="agent", tool="agent", model="", task="x")
+    assert store.claim_coding_job("jf", "w1")
+    # 다른 owner의 fenced write는 거부
+    assert not store.update_coding_job("jf", owner="w2", status="done")
+    assert store.update_coding_job("jf", owner="w1", status="done")
+    # retry도 owner fencing 적용
+    store.create_coding_job("jr", engine="agent", tool="agent", model="", task="x")
+    store.claim_coding_job("jr", "w1")
+    assert store.schedule_coding_retry("jr", delay_seconds=0, error="e", owner="w2") == "lost"
+    assert store.schedule_coding_retry("jr", delay_seconds=0, error="e", owner="w1") == "queued"
+    # 존재하지 않는 job도 lost
+    assert store.schedule_coding_retry("nope", delay_seconds=0, error="e") == "lost"
+
+
+def test_stale_worker_cannot_overwrite(tmp_path: Path):
+    """lease를 뺏긴 워커는 실행을 중단하고 최종 상태를 덮어쓰지 못한다."""
+    settings, store = _env(tmp_path)
+
+    def slow_handler(**kw):
+        time.sleep(0.2)
+        return {"action": "tool", "tool": "ls", "args": {}}
+
+    llm = FakeLLM(slow_handler)
+    w1 = CodingJobWorker(store, settings, llm, owner="w1", lease_seconds=3)
+    store.create_coding_job("js", engine="agent", tool="agent", model="", task="loop")
+    assert w1.submit("js")
+    time.sleep(0.3)  # running + 첫 스텝 진행 중
+    # w2가 lease를 강탈(예: w1 heartbeat 지연/네트워크 파티션 상황 재현)
+    store.update_coding_job("js", lease_owner="w2", lease_expires_at="2999-01-01T00:00:00+00:00")
+    # w1 heartbeat 실패 → lease_lost → agent 취소 → fenced write 전부 실패
+    deadline = time.monotonic() + 10
+    while "js" in w1._active and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert "js" not in w1._active
+    # w1의 어떤 write도 반영되지 않았음을 확인: w2가 완료 처리하면 그대로 유지
+    assert store.update_coding_job(
+        "js",
+        owner="w2",
+        status="done",
+        answer="w2 wins",
+        lease_owner="",
+        lease_expires_at=None,
+    )
+    job = store.get_coding_job("js")
+    assert job["status"] == "done" and job["answer"] == "w2 wins"
+
+
 # ---------- sandbox ----------
 
 
