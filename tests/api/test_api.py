@@ -514,3 +514,60 @@ def test_cron_tick_vercel_requires_secret(monkeypatch):
     monkeypatch.setenv("JOBMATE_API_KEY", "apikey123")
     r3 = client.get("/api/v1/cron/tick", headers={"Authorization": "Bearer s3cret"})
     assert r3.status_code == 200
+
+
+def test_radar_refresh_serverless_runs_via_background_tasks(monkeypatch):
+    """VERCEL 환경: refresh가 BackgroundTasks로 run을 끝까지 실행해 waiting_approval 도달."""
+    monkeypatch.setenv("VERCEL", "1")
+    from jobmate.adapters.fakes import FakeGitHub
+    from jobmate.models import RepoSummary
+
+    db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
+    settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
+    store = Store(db)
+    gh = FakeGitHub(
+        repos={
+            "*": [
+                {
+                    "full_name": "a/x",
+                    "html_url": "https://github.com/a/x",
+                    "description": "desc",
+                    "stars": 100,
+                    "language": "Python",
+                    "topics": ["agent"],
+                    "archived": False,
+                    "fork": False,
+                    "license": "MIT",
+                }
+            ]
+        },
+        readmes={"a/x": "# readme"},
+    )
+    llm = scripted_llm(
+        {
+            "RepoSummary": RepoSummary(
+                summary_en="en",
+                summary_zh="zh",
+                summary_ko="ko",
+                taxonomy="agent-skill",
+                taxonomy_confidence=0.9,
+            )
+        }
+    )
+    app = create_app(
+        settings=settings, store=store, llm=llm, adapters={"github": gh, "notifier": None}
+    )
+    client = TestClient(app)
+    r = client.post("/api/v1/radar/refresh", json={"platforms": ["claude"], "force": True})
+    assert r.status_code == 202
+    run_id = r.json()["run_ids"][0]
+    # TestClient는 BackgroundTasks 완료까지 응답을 기다린다
+    d = client.get(f"/api/v1/runs/{run_id}").json()
+    assert d["status"] == "waiting_approval"
+    assert [s["stage_key"] for s in d["stages"]] == [
+        "collect",
+        "dedupe",
+        "summarize",
+        "rank",
+        "approve",
+    ]

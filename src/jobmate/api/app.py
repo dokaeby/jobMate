@@ -11,13 +11,14 @@ import os
 import threading
 import uuid
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -177,7 +178,9 @@ def create_app(
         logger.info(
             "jobmate api starting mode=%s db=%s serverless=%s",
             settings.mode,
-            "postgres" if settings.database_url else "sqlite",
+            "postgres"
+            if database_dsn(settings).startswith(("postgres://", "postgresql://"))
+            else "sqlite",
             bool(os.environ.get("VERCEL")),
         )
         app.state.store = store
@@ -273,13 +276,43 @@ def create_app(
         run = store.get_run(run_id)
         logger.info("run %s finished status=%s", run_id, getattr(run, "status", "?"))
 
-    def submit_run(workflow: str, task: str, ctx: dict[str, Any] | None = None) -> str:
+    def _run_jobs_parallel(
+        jobs: list[tuple[str, str, dict[str, Any], dict[str, Any] | None]],
+    ) -> None:
+        """서버리스 waitUntil 구간에서 run들을 병렬 실행 (daemon thread 대체)."""
+        if not jobs:
+            return
+        with ThreadPoolExecutor(max_workers=min(len(jobs), 4)) as pool:
+            list(pool.map(lambda j: execute_run(*j), jobs))
+
+    def _schedule_run_jobs(
+        jobs: list[tuple[str, str, dict[str, Any], dict[str, Any] | None]],
+        background_tasks: BackgroundTasks | None,
+    ) -> None:
+        """VERCEL에서는 FastAPI BackgroundTasks로 응답 후에도 함수 수명을 연장해
+        run이 완료까지 실행되게 한다. 그 외 환경은 기존 daemon thread 방식."""
+        if not jobs:
+            return
+        if os.environ.get("VERCEL") and background_tasks is not None:
+            background_tasks.add_task(_run_jobs_parallel, jobs)
+            return
+        for job in jobs:
+            threading.Thread(target=execute_run, args=job, daemon=True).start()
+
+    def submit_run(
+        workflow: str,
+        task: str,
+        ctx: dict[str, Any] | None = None,
+        defer: list[tuple[str, str, dict[str, Any], dict[str, Any] | None]] | None = None,
+    ) -> str:
         run = store.create_run(
             workflow, WORKFLOWS[workflow].version, {"task": task}, trace_id=uuid.uuid4().hex
         )
-        threading.Thread(
-            target=execute_run, args=(run.id, workflow, {"task": task}, ctx), daemon=True
-        ).start()
+        job = (run.id, workflow, {"task": task}, ctx)
+        if defer is not None:
+            defer.append(job)
+        else:
+            threading.Thread(target=execute_run, args=job, daemon=True).start()
         return run.id
 
     @app.get("/")
@@ -300,7 +333,9 @@ def create_app(
         return [{"key": w.key, "version": w.version} for w in WORKFLOWS.values()]
 
     @app.post("/api/v1/runs", status_code=202)
-    def create_run(body: RunCreateRequest, request: Request) -> JSONResponse:
+    def create_run(
+        body: RunCreateRequest, request: Request, background_tasks: BackgroundTasks
+    ) -> JSONResponse:
         if body.workflow not in WORKFLOWS:
             return err(404, "unknown_workflow", f"workflow '{body.workflow}' not found", request)
         run = store.create_run(
@@ -309,9 +344,7 @@ def create_app(
             {"task": body.task, **({"meta": body.metadata} if body.metadata else {})},
             trace_id=uuid.uuid4().hex,
         )
-        threading.Thread(
-            target=execute_run, args=(run.id, body.workflow, {"task": body.task}, None), daemon=True
-        ).start()
+        _schedule_run_jobs([(run.id, body.workflow, {"task": body.task}, None)], background_tasks)
         return JSONResponse(status_code=202, content={"id": run.id, "status": run.status.value})
 
     @app.get("/api/v1/runs")
@@ -497,7 +530,7 @@ def create_app(
         return JSONResponse(content={"summary": summary, "count": len(msgs)})
 
     @app.api_route("/api/v1/cron/tick", methods=["GET", "POST"])
-    def cron_tick(request: Request) -> JSONResponse:
+    def cron_tick(request: Request, background_tasks: BackgroundTasks) -> JSONResponse:
         """서버리스 환경용 1회 자동화 사이클 (Vercel Cron 등에서 호출)."""
         secret = os.environ.get("CRON_SECRET") or os.environ.get("JOBMATE_CRON_SECRET", "")
         if os.environ.get("VERCEL"):
@@ -509,7 +542,9 @@ def create_app(
         _process_pending_messages(store, settings, llm, adapters)
         _process_due_notification_jobs(store, adapters)
         _maybe_poll_gmail(store, settings, adapters)
-        _maybe_daily_radar(store, settings, llm, adapters)
+        radar_jobs: list = []
+        _maybe_daily_radar(store, settings, llm, adapters, defer=radar_jobs)
+        _schedule_run_jobs(radar_jobs, background_tasks)
         logger.info("cron tick cycle completed")
         return JSONResponse(content={"ok": True})
 
@@ -962,14 +997,23 @@ def create_app(
         return {"platform": platform, "dates": store.radar_dates(platform)}
 
     @app.post("/api/v1/radar/refresh", status_code=202)
-    def radar_refresh(body: dict[str, Any] | None = None) -> JSONResponse:
+    def radar_refresh(
+        background_tasks: BackgroundTasks, body: dict[str, Any] | None = None
+    ) -> JSONResponse:
         body = body or {}
         platforms = body.get("platforms") or settings.radar_platforms
         force = bool(body.get("force", True))
+        jobs: list = []
         ids = []
         for p in platforms:
-            rid = submit_run("skill_radar", f"radar collect {p}", {"platform": p, "force": force})
+            rid = submit_run(
+                "skill_radar",
+                f"radar collect {p}",
+                {"platform": p, "force": force},
+                defer=jobs,
+            )
             ids.append(rid)
+        _schedule_run_jobs(jobs, background_tasks)
         return JSONResponse(status_code=202, content={"run_ids": ids, "platforms": platforms})
 
     # ---- Web Push 구독 ----
@@ -1262,7 +1306,11 @@ def _poll_gmail(store: Store, settings: Settings, gmail: Any) -> int:
 
 
 def _maybe_daily_radar(
-    store: Store, settings: Settings, llm: Any, adapters: dict[str, Any]
+    store: Store,
+    settings: Settings,
+    llm: Any,
+    adapters: dict[str, Any],
+    defer: list[tuple[str, str, dict[str, Any], dict[str, Any] | None]] | None = None,
 ) -> None:
     """KST 06:00 이후 최초 1회 radar 자동 수집 (자동화 플래그)."""
     auto = store.get_automation()
@@ -1287,15 +1335,18 @@ def _maybe_daily_radar(
     scheduled = []
     for p in settings.radar_platforms:
         if not store.radar_snapshot_exists(p, today):
-            _create_and_run(
-                store,
-                settings,
-                llm,
-                adapters,
-                "skill_radar",
-                f"radar daily {p}",
-                {"platform": p, "force": False},
-            )
+            task = f"radar daily {p}"
+            ctx = {"platform": p, "force": False}
+            if defer is not None:
+                run = store.create_run(
+                    "skill_radar",
+                    WORKFLOWS["skill_radar"].version,
+                    {"task": task},
+                    trace_id=uuid.uuid4().hex,
+                )
+                defer.append((run.id, "skill_radar", {"task": task}, ctx))
+            else:
+                _create_and_run(store, settings, llm, adapters, "skill_radar", task, ctx)
             scheduled.append(p)
     auto["last_radar_date"] = today
     store.set_automation(auto)
