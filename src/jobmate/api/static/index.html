@@ -337,6 +337,7 @@
           </select>
           <select id="radar-date" hidden></select>
           <button class="secondary" id="radar-refresh">새로고침</button>
+          <span id="radar-status" class="card-meta" role="status"></span>
         </div>
       </div>
 
@@ -1172,12 +1173,14 @@ $("#radar-topic-platforms").addEventListener("click", e => {
   radarLoadTopicRepos();
 });
 $("#radar-refresh").addEventListener("click", async () => {
+  const st = $("#radar-status");
+  st.textContent = "수집 시작 중…";
   try {
     const r = await api("/radar/refresh", {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({platforms: [radar.platform], force: true})});
-    $("#form-status").textContent = `레이더 수집 시작: ${r.run_ids.join(",")}`;
-  } catch (e) { alert(e.message); }
+    st.textContent = `수집 run 시작: ${r.run_ids.join(",")} — 실행 이력에서 승인 후 발행됩니다`;
+  } catch (e) { st.textContent = e.message; }
 });
 
 /* ── Runs ── */

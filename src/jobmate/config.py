@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -158,4 +159,7 @@ def database_dsn(settings: Settings) -> str:
 
 @lru_cache
 def get_settings() -> Settings:
+    # .env를 os.environ에 로드 — GEMINI_API_KEY/GITHUB_TOKEN 등 비밀값은
+    # Settings 필드가 아니라 os.environ에서 직접 읽으므로 반드시 필요.
+    load_dotenv()
     return Settings()

@@ -90,6 +90,11 @@ class GitHubAPI:
                 continue
             if resp.status_code == 200:
                 return resp.json()
+            if resp.status_code == 401 and self._token:
+                # 토큰 만료/무효 — 토큰 없이 1회 재시도 (레이트리밋만 낮아짐)
+                logger.warning("github api 401 — token rejected, retrying unauthenticated")
+                self._token = ""
+                continue
             if resp.status_code in (403, 429, 500, 502, 503):
                 if attempt == self._max_retries:
                     logger.warning(

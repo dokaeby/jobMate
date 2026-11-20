@@ -94,6 +94,8 @@ class OpenAICompatLLM:
                     )
                     time.sleep(self._backoff * (2**attempt))
                     continue
+                if resp.status_code >= 400:
+                    raise LLMError(f"llm http {resp.status_code}: {resp.text[:300]}")
                 resp.raise_for_status()
                 data = resp.json()
                 text = data["choices"][0]["message"]["content"]
