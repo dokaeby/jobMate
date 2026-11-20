@@ -148,6 +148,7 @@
     <span class="nav-label">메뉴</span>
     <nav>
       <button class="nav-item active" data-view="gmail"><span class="ico">✉</span>Gmail Checker</button>
+      <button class="nav-item" data-view="coding"><span class="ico">⌘</span>코드 어댑터</button>
       <button class="nav-item" data-view="calendar"><span class="ico">▣</span>Calendar</button>
       <button class="nav-item" data-view="radar"><span class="ico">◈</span>Skill Radar</button>
       <button class="nav-item" data-view="runs"><span class="ico">▶</span>실행 이력</button>
@@ -166,6 +167,32 @@
         <pre id="digest-body"></pre>
       </div>
       <div id="gmail-cards"><div class="empty">로딩…</div></div>
+    </section>
+
+    <!-- 코드 어댑터 -->
+    <section id="view-coding" hidden>
+      <div class="page-head">
+        <h1 class="page-title">코드 어댑터</h1>
+        <p class="page-desc">선택한 코딩 CLI를 헤드리스로 실행하고 결과를 표시</p>
+      </div>
+      <div class="card">
+        <div class="grid-form">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <label style="font-size:13px;font-weight:600">도구
+              <select id="coding-tool"></select></label>
+            <label style="font-size:13px;font-weight:600">모델
+              <input id="coding-model" placeholder="CLI 기본 모델"></label>
+          </div>
+          <label style="font-size:13px;font-weight:600">작업 지시
+            <textarea id="coding-task" rows="4" required
+              placeholder="예: hello.txt 파일을 만들고 내용을 'hello'로 작성"></textarea></label>
+          <div>
+            <button id="coding-run">실행</button>
+            <span class="status-line" id="coding-status" role="status"></span>
+          </div>
+        </div>
+      </div>
+      <div id="coding-result"></div>
     </section>
 
     <!-- Calendar -->
@@ -244,7 +271,7 @@ async function api(path, opts) {
 const badge = (s) => `<span class="badge ${esc(s)}">${esc(s)}</span>`;
 
 /* ── 뷰 전환 ── */
-const VIEWS = { gmail: loadGmail, calendar: loadCalendar,
+const VIEWS = { gmail: loadGmail, coding: loadCoding, calendar: loadCalendar,
                 radar: loadRadar, runs: loadRuns };
 const loaded = {};
 document.querySelectorAll(".nav-item").forEach(b =>
@@ -323,6 +350,67 @@ async function retryMsg(provider, sid) {
     await api(`/messages/${provider}/${sid}/retry`, {method:"POST"});
     loadGmail();
   } catch (e) { alert(e.message); }
+}
+
+/* ── 코드 어댑터 ── */
+let codingPoll = null;
+async function loadCoding() {
+  if ($("#coding-tool").options.length) return;
+  try {
+    const d = await api("/coding/tools");
+    $("#coding-tool").innerHTML = (d.tools || []).map(t =>
+      `<option value="${esc(t.name)}" ${t.default ? "selected" : ""}${t.available ? "" : " disabled"}>
+        ${esc(t.name)}${t.available ? "" : " (미설치)"}</option>`).join("");
+    if (d.default_model) $("#coding-model").value = d.default_model;
+    $("#coding-model").placeholder = "비우면 CLI 기본 모델";
+  } catch (e) {
+    $("#coding-status").textContent = e.message;
+    $("#coding-status").className = "status-line err";
+  }
+}
+$("#coding-run").addEventListener("click", async () => {
+  const st = $("#coding-status");
+  st.textContent = "실행 중…"; st.className = "status-line";
+  $("#coding-result").innerHTML = "";
+  try {
+    const r = await api("/coding/run", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        tool: $("#coding-tool").value,
+        model: $("#coding-model").value.trim(),
+        task: $("#coding-task").value.trim()})});
+    pollCodingJob(r.job_id);
+  } catch (e) { st.textContent = e.message; st.className = "status-line err"; }
+});
+function pollCodingJob(jobId) {
+  clearInterval(codingPoll);
+  codingPoll = setInterval(async () => {
+    try {
+      const j = await api("/coding/jobs/" + jobId);
+      const st = $("#coding-status");
+      if (j.status === "running") {
+        st.textContent = `${j.tool} 실행 중…`; return;
+      }
+      clearInterval(codingPoll);
+      if (j.status === "failed") {
+        st.textContent = "실패: " + j.error;
+        st.className = "status-line err";
+        return;
+      }
+      st.textContent = `완료 (${j.tool}${j.model ? "/" + j.model : ""}, exit=${j.exit_code})`;
+      st.className = "status-line";
+      $("#coding-result").innerHTML = `
+        <div class="card"><h3 style="margin:0 0 10px;font-size:14px">출력</h3>
+          <pre class="block" style="white-space:pre-wrap">${esc(j.text || "(출력 없음)")}</pre></div>
+        ${j.diff ? `<div class="card"><h3 style="margin:0 0 10px;font-size:14px">Diff</h3>
+          <pre class="block">${esc(j.diff)}</pre>
+          <div class="card-meta">workspace: ${esc(j.workspace || "")}</div></div>` : ""}`;
+    } catch (e) {
+      clearInterval(codingPoll);
+      $("#coding-status").textContent = e.message;
+      $("#coding-status").className = "status-line err";
+    }
+  }, 2000);
 }
 
 /* ── Calendar ── */

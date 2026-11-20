@@ -145,3 +145,18 @@ def test_email_check_no_gmail_adapter():
     client = TestClient(app)
     r = client.post("/api/v1/email/check", json={})
     assert r.status_code == 503
+
+
+def test_coding_tools_and_run_validation():
+    client, _ = _client()
+    r = client.get("/api/v1/coding/tools")
+    assert r.status_code == 200
+    names = [t["name"] for t in r.json()["tools"]]
+    assert set(names) == {"claude", "codex", "antigravity", "opencode"}
+
+    r = client.post("/api/v1/coding/run", json={"tool": "nope", "task": "x"})
+    assert r.status_code == 400
+    r = client.post("/api/v1/coding/run", json={"tool": "codex", "task": ""})
+    assert r.status_code == 422
+    r = client.get("/api/v1/coding/jobs/nonexistent")
+    assert r.status_code == 404

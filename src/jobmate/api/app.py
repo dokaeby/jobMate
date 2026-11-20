@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
 import uuid
 from collections.abc import AsyncIterator
@@ -478,6 +479,125 @@ def create_app(
         for c in cards:
             c["url"] = f"https://mail.google.com/mail/u/0/#all/{c['source_id']}"
         return {"cards": cards}
+
+    # ---------- coding tool (코드 어댑터) ----------
+    coding_jobs: dict[str, dict[str, Any]] = {}
+    coding_jobs_lock = threading.Lock()
+
+    def _coding_workspace(job_id: str, custom: str = "") -> str:
+        """작업 디렉터리. custom이 있으면 그대로, 없으면 run별 git repo 생성."""
+        from ..tools.coding import CodingToolError
+
+        if custom:
+            p = Path(custom).expanduser()
+            if not p.is_dir():
+                raise CodingToolError(f"workspace not found: {custom}")
+            return str(p)
+        if settings.coding_workspace:
+            return settings.coding_workspace
+        ws = Path(settings.db_path).parent / "workspaces" / f"coding-{job_id}"
+        if not (ws / ".git").exists():
+            ws.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "init", "-q"], cwd=ws, check=True)  # noqa: S603,S607
+            subprocess.run(  # noqa: S603
+                [  # noqa: S607
+                    "git",
+                    "-c",
+                    "user.email=jobmate@local",
+                    "-c",
+                    "user.name=jobmate",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "init",
+                ],
+                cwd=ws,
+                check=True,
+            )
+        return str(ws)
+
+    @app.get("/api/v1/coding/tools")
+    def coding_tools() -> dict[str, Any]:
+        from ..tools.coding import CODING_TOOLS, build_coding_tool
+
+        tools = []
+        for n in CODING_TOOLS:
+            t = build_coding_tool(n)
+            tools.append(
+                {
+                    "name": n,
+                    "available": bool(t and t.available()),
+                    "default": n == settings.coding_tool,
+                }
+            )
+        return {"tools": tools, "default_model": settings.coding_model}
+
+    @app.post("/api/v1/coding/run")
+    def coding_run(body: dict[str, Any], request: Request) -> JSONResponse:
+        from ..tools.coding import build_coding_tool
+
+        tool_name = str(body.get("tool") or settings.coding_tool)
+        task = str(body.get("task") or "").strip()
+        if not task:
+            return err(422, "validation", "task is required", request)
+        tool = build_coding_tool(
+            tool_name, model=str(body.get("model") or settings.coding_model or "") or None
+        )
+        if tool is None:
+            return err(400, "unknown_tool", f"unknown coding tool: {tool_name}", request)
+        if not tool.available():
+            return err(503, "tool_unavailable", f"{tool_name} CLI not found on PATH", request)
+        job_id = uuid.uuid4().hex[:12]
+        with coding_jobs_lock:
+            coding_jobs[job_id] = {
+                "job_id": job_id,
+                "status": "running",
+                "tool": tool_name,
+                "model": body.get("model") or settings.coding_model or "",
+                "task": task[:500],
+                "created_at": datetime.now(UTC).isoformat(),
+                "workspace": "",
+                "ok": None,
+                "text": "",
+                "diff": "",
+                "error": "",
+            }
+
+        def worker() -> None:
+            try:
+                cwd = _coding_workspace(job_id, str(body.get("workspace") or ""))
+                res = tool.run(prompt=task, cwd=cwd, timeout=settings.coding_timeout_seconds)
+                with coding_jobs_lock:
+                    coding_jobs[job_id].update(
+                        status="done",
+                        ok=res.ok,
+                        text=res.text,
+                        diff=res.diff,
+                        workspace=cwd,
+                        exit_code=res.exit_code,
+                    )
+                store.audit(
+                    "",
+                    f"tool:{res.tool}",
+                    "coding_run",
+                    job_id,
+                    {"exit_code": res.exit_code, "diff_chars": len(res.diff)},
+                )
+            except Exception as e:
+                with coding_jobs_lock:
+                    coding_jobs[job_id].update(status="failed", error=str(e)[:500])
+
+        threading.Thread(target=worker, daemon=True).start()
+        return JSONResponse(status_code=202, content={"job_id": job_id})
+
+    @app.get("/api/v1/coding/jobs/{job_id}")
+    def coding_job(job_id: str, request: Request) -> JSONResponse:
+        with coding_jobs_lock:
+            job = coding_jobs.get(job_id)
+        if job is None:
+            return err(404, "not_found", "coding job not found", request)
+        return JSONResponse(content=dict(job))
 
     @app.post("/api/v1/messages/{provider}/{source_id}/retry")
     def retry_message(provider: str, source_id: str, request: Request) -> JSONResponse:
