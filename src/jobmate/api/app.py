@@ -619,23 +619,30 @@ def create_app(
     def coding_run(body: dict[str, Any], request: Request) -> JSONResponse:
         from ..tools.coding import build_coding_tool
 
+        engine = str(body.get("engine") or "").strip().lower()
         pref_tool = _prefs().get("coding_tool")
         tool_name = str(body.get("tool") or pref_tool or settings.coding_tool)
         task = str(body.get("task") or "").strip()
         if not task:
             return err(422, "validation", "task is required", request)
-        tool = build_coding_tool(
-            tool_name, model=str(body.get("model") or settings.coding_model or "") or None
-        )
-        if tool is None:
-            return err(400, "unknown_tool", f"unknown coding tool: {tool_name}", request)
-        if not tool.available():
-            return err(503, "tool_unavailable", f"{tool_name} CLI not found on PATH", request)
+        if engine == "agent" or tool_name == "agent":
+            engine, tool_name = "agent", "agent"
+            tool = None
+        else:
+            engine = "cli"
+            tool = build_coding_tool(
+                tool_name, model=str(body.get("model") or settings.coding_model or "") or None
+            )
+            if tool is None:
+                return err(400, "unknown_tool", f"unknown coding tool: {tool_name}", request)
+            if not tool.available():
+                return err(503, "tool_unavailable", f"{tool_name} CLI not found on PATH", request)
         job_id = uuid.uuid4().hex[:12]
         with coding_jobs_lock:
             coding_jobs[job_id] = {
                 "job_id": job_id,
                 "status": "running",
+                "engine": engine,
                 "tool": tool_name,
                 "model": body.get("model") or settings.coding_model or "",
                 "task": task[:500],
@@ -643,6 +650,8 @@ def create_app(
                 "workspace": "",
                 "ok": None,
                 "text": "",
+                "answer": "",
+                "steps": [],
                 "diff": "",
                 "error": "",
             }
@@ -650,6 +659,37 @@ def create_app(
         def worker() -> None:
             try:
                 cwd = _coding_workspace(job_id, str(body.get("workspace") or ""))
+                if engine == "agent":
+                    from ..agent import CodingAgent
+                    from ..tools.coding import workspace_diff
+
+                    agent_res = CodingAgent(llm, settings).run(
+                        task,
+                        cwd,
+                        model=str(body.get("model") or ""),
+                        timeout=settings.coding_timeout_seconds,
+                    )
+                    ok = agent_res["status"] == "done"
+                    with coding_jobs_lock:
+                        coding_jobs[job_id].update(
+                            status="done" if ok else "failed",
+                            ok=ok,
+                            text=agent_res["answer"],
+                            answer=agent_res["answer"],
+                            steps=agent_res["steps"],
+                            diff=workspace_diff(cwd),
+                            workspace=cwd,
+                            error=agent_res["error"] or ("" if ok else agent_res["status"]),
+                        )
+                    store.audit(
+                        "",
+                        "tool:agent",
+                        "coding_run",
+                        job_id,
+                        {"status": agent_res["status"], "steps": len(agent_res["steps"])},
+                    )
+                    return
+                assert tool is not None
                 res = tool.run(prompt=task, cwd=cwd, timeout=settings.coding_timeout_seconds)
                 with coding_jobs_lock:
                     coding_jobs[job_id].update(

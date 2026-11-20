@@ -162,6 +162,43 @@ def test_coding_tools_and_run_validation():
     assert r.status_code == 404
 
 
+def test_coding_run_agent_engine():
+    """engine=agent → 내장 CodingAgent 루프가 job을 완료하고 steps/diff를 반환."""
+    import time
+
+    db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")
+    settings = Settings(db_path=db, budget_max_tokens=100_000, coding_tool="none")
+    store = Store(db)
+    llm = scripted_llm(
+        {
+            "AgentAction": [
+                {
+                    "action": "tool",
+                    "tool": "write_file",
+                    "args": {"path": "agent_out.txt", "content": "from agent"},
+                },
+                {"action": "final", "answer": "에이전트 완료"},
+            ]
+        }
+    )
+    client = TestClient(create_app(settings=settings, store=store, llm=llm))
+    r = client.post("/api/v1/coding/run", json={"engine": "agent", "task": "create agent_out.txt"})
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+    job = {}
+    for _ in range(100):
+        job = client.get(f"/api/v1/coding/jobs/{job_id}").json()
+        if job["status"] != "running":
+            break
+        time.sleep(0.1)
+    assert job["status"] == "done"
+    assert job["engine"] == "agent"
+    assert job["tool"] == "agent"
+    assert job["answer"] == "에이전트 완료"
+    assert len(job["steps"]) == 1
+    assert "agent_out.txt" in job["diff"]
+
+
 def test_settings_prefs_roundtrip():
     client, store = _client()
     r = client.get("/api/v1/settings")

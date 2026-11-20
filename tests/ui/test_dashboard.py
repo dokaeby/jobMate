@@ -78,7 +78,7 @@ def test_sidebar_navigation(page: Page) -> None:
     """사이드바 5개 메뉴가 각각 우측 화면을 전환한다."""
     for view, title in [
         ("gmail", "Gmail Checker"),
-        ("coding", "코드 어댑터"),
+        ("coding", "코딩 에이전트"),
         ("calendar", "Calendar"),
         ("radar", "Skill Radar"),
         ("runs", "실행"),
@@ -116,11 +116,16 @@ def test_runs_view_table(page: Page) -> None:
 
 
 def test_coding_view_tool_options(page: Page) -> None:
-    """코드 어댑터 뷰에 CLI 목록이 로드된다."""
+    """코딩 에이전트 뷰에 실행 방식(내장 에이전트/CLI)과 도구 목록이 로드된다."""
     page.click('.nav-item[data-view="coding"]')
     page.wait_for_function("document.querySelectorAll('#coding-tool option').length > 0")
     values = page.locator("#coding-tool option").evaluate_all("els => els.map(e => e.value)")
     assert set(values) == {"claude", "codex", "antigravity", "opencode"}
+    # 기본 실행 방식은 내장 에이전트, 선택 시 CLI 필드가 비활성화된다
+    assert page.locator("#coding-engine").input_value() == "agent"
+    assert page.locator("#coding-tool").is_disabled()
+    page.select_option("#coding-engine", "cli")
+    assert not page.locator("#coding-tool").is_disabled()
 
 
 def test_settings_dialog_save(page: Page, base_url: str) -> None:

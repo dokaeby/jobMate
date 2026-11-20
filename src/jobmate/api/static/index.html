@@ -153,7 +153,7 @@
     <span class="nav-label">메뉴</span>
     <nav>
       <button class="nav-item active" data-view="gmail"><span class="ico">✉</span>Gmail Checker</button>
-      <button class="nav-item" data-view="coding"><span class="ico">⌘</span>코드 어댑터</button>
+      <button class="nav-item" data-view="coding"><span class="ico">⌘</span>코딩 에이전트</button>
       <button class="nav-item" data-view="calendar"><span class="ico">▣</span>Calendar</button>
       <button class="nav-item" data-view="radar"><span class="ico">◈</span>Skill Radar</button>
       <button class="nav-item" data-view="runs"><span class="ico">▶</span>실행 이력</button>
@@ -177,12 +177,17 @@
     <!-- 코드 어댑터 -->
     <section id="view-coding" hidden>
       <div class="page-head">
-        <h1 class="page-title">코드 어댑터</h1>
-        <p class="page-desc">선택한 코딩 CLI를 헤드리스로 실행하고 결과를 표시</p>
+        <h1 class="page-title">코딩 에이전트</h1>
+        <p class="page-desc">내장 에이전트(파일/셸 도구 루프) 또는 코딩 CLI를 실행하고 결과를 표시</p>
       </div>
       <div class="card">
         <div class="grid-form">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <label style="font-size:13px;font-weight:600">실행 방식
+              <select id="coding-engine">
+                <option value="agent" selected>내장 에이전트</option>
+                <option value="cli">CLI 어댑터</option>
+              </select></label>
             <label style="font-size:13px;font-weight:600">도구
               <select id="coding-tool"></select></label>
             <label style="font-size:13px;font-weight:600">모델
@@ -412,11 +417,19 @@ async function loadCoding() {
         ${esc(t.name)}${t.available ? "" : " (미설치)"}</option>`).join("");
     if (d.default_model) $("#coding-model").value = d.default_model;
     $("#coding-model").placeholder = "비우면 CLI 기본 모델";
+    syncEngineUI();
   } catch (e) {
     $("#coding-status").textContent = e.message;
     $("#coding-status").className = "status-line err";
   }
 }
+function syncEngineUI() {
+  const isAgent = $("#coding-engine").value === "agent";
+  $("#coding-tool").disabled = isAgent;
+  $("#coding-model").disabled = isAgent;
+  $("#coding-model").placeholder = isAgent ? "에이전트 모델 (비우면 기본)" : "CLI 기본 모델";
+}
+$("#coding-engine").addEventListener("change", syncEngineUI);
 $("#coding-run").addEventListener("click", async () => {
   const st = $("#coding-status");
   st.textContent = "실행 중…"; st.className = "status-line";
@@ -425,6 +438,7 @@ $("#coding-run").addEventListener("click", async () => {
     const r = await api("/coding/run", {method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
+        engine: $("#coding-engine").value,
         tool: $("#coding-tool").value,
         model: $("#coding-model").value.trim(),
         task: $("#coding-task").value.trim()})});
@@ -446,11 +460,21 @@ function pollCodingJob(jobId) {
         st.className = "status-line err";
         return;
       }
-      st.textContent = `완료 (${j.tool}${j.model ? "/" + j.model : ""}, exit=${j.exit_code})`;
+      const stepsHtml = (j.steps || []).length ? `
+        <div class="card"><h3 style="margin:0 0 10px;font-size:14px">에이전트 스텝 (${j.steps.length})</h3>
+          ${j.steps.map(s => `
+            <div style="border-left:2px solid var(--accent);padding:6px 10px;margin:6px 0">
+              <div class="card-meta mono">#${s.step} ${esc(s.tool)}(${esc(JSON.stringify(s.args))})</div>
+              ${s.thought ? `<div class="card-meta">${esc(s.thought)}</div>` : ""}
+              <pre class="block" style="white-space:pre-wrap;font-size:12px">${esc(s.result || "")}</pre>
+            </div>`).join("")}
+        </div>` : "";
+      st.textContent = `완료 (${j.tool}${j.model ? "/" + j.model : ""}${j.exit_code != null ? ", exit=" + j.exit_code : ""})`;
       st.className = "status-line";
       $("#coding-result").innerHTML = `
+        ${stepsHtml}
         <div class="card"><h3 style="margin:0 0 10px;font-size:14px">출력</h3>
-          <pre class="block" style="white-space:pre-wrap">${esc(j.text || "(출력 없음)")}</pre></div>
+          <pre class="block" style="white-space:pre-wrap">${esc(j.answer || j.text || "(출력 없음)")}</pre></div>
         ${j.diff ? `<div class="card"><h3 style="margin:0 0 10px;font-size:14px">Diff</h3>
           <pre class="block">${esc(j.diff)}</pre>
           <div class="card-meta">workspace: ${esc(j.workspace || "")}</div></div>` : ""}`;
