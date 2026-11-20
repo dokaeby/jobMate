@@ -136,6 +136,7 @@
     .sidebar { position: static; }
     .nav { display: flex; gap: 4px; overflow-x: auto; }
   }
+#auth-overlay[hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -303,6 +304,20 @@
   </div>
 </dialog>
 
+<div id="auth-overlay" hidden
+     style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100">
+  <div class="card" style="width:320px">
+    <div class="card-title">API 키 필요</div>
+    <div class="card-body">서버에 인증이 설정되어 있습니다. API 키를 입력하세요.</div>
+    <input id="auth-key" type="password" placeholder="API 키"
+           style="width:100%;margin:10px 0;box-sizing:border-box">
+    <div id="auth-err" class="card-meta" role="alert"
+         style="color:#e5484d;min-height:1em"></div>
+    <button id="auth-submit" style="width:100%">확인</button>
+    <button id="auth-cancel" class="secondary" style="width:100%;margin-top:6px">취소</button>
+  </div>
+</div>
+
 <script>
 const API = "/api/v1";
 const $ = (s) => document.querySelector(s);
@@ -315,16 +330,43 @@ function apiHeaders() {
   if (key) headers["X-API-Key"] = key;
   return headers;
 }
+let _authResolvers = [];
+function askApiKey() {
+  return new Promise(res => {
+    const first = _authResolvers.length === 0;
+    _authResolvers.push(res);
+    $("#auth-overlay").hidden = false;
+    if (first) {
+      $("#auth-key").value = "";
+      $("#auth-err").textContent = "";
+    }
+    setTimeout(() => $("#auth-key").focus(), 50);
+  });
+}
+function _closeAuth(key) {
+  $("#auth-overlay").hidden = true;
+  const rs = _authResolvers;
+  _authResolvers = [];
+  rs.forEach(r => r(key));
+}
+$("#auth-submit").addEventListener("click", () => {
+  const k = $("#auth-key").value.trim();
+  if (!k) { $("#auth-err").textContent = "키를 입력하세요"; return; }
+  localStorage.setItem("jobmate_api_key", k);
+  _closeAuth(k);
+});
+$("#auth-cancel").addEventListener("click", () => _closeAuth(null));
+$("#auth-key").addEventListener("keydown", e => {
+  if (e.key === "Enter") $("#auth-submit").click();
+});
+
 async function api(path, opts, _retried) {
   opts = opts || {};
   const headers = Object.assign({}, opts.headers, apiHeaders());
   const r = await fetch(API + path, Object.assign({}, opts, {headers}));
   if (r.status === 401 && !_retried) {
-    const k = prompt("API 키를 입력하세요 (서버 JOBMATE_API_KEY)");
-    if (k) {
-      localStorage.setItem("jobmate_api_key", k.trim());
-      return api(path, opts, true);
-    }
+    const k = await askApiKey();
+    if (k) return api(path, opts, true);
   }
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
