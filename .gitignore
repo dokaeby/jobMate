@@ -47,3 +47,6 @@ logs/
 .vercel
 .env*
 .playwright-mcp/
+
+# LangGraph sqlite 체크포인트 부산물
+*.db.checkpoints*
