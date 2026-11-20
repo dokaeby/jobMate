@@ -18,6 +18,7 @@ credentials*.json
 token*.json
 *token*.json
 *secret*
+!src/jobmate/sensors/secrets.py
 *credential*
 auth.json
 service-account*.json
