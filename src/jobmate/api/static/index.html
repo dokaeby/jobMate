@@ -670,7 +670,9 @@
 
 <div id="auth-overlay" hidden
      style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100">
-  <div class="card" style="width:340px">
+  <div class="card" style="width:340px;position:relative">
+    <button id="auth-close" title="닫기"
+            style="position:absolute;top:10px;right:12px;border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px;line-height:1">✕</button>
     <div class="card-title">jobMate 로그인</div>
     <div style="display:flex;gap:6px;margin:10px 0">
       <button id="auth-tab-login" class="secondary auth-tab" style="flex:1">로그인</button>
@@ -733,6 +735,7 @@ if (_authErrParam) {
   history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
 }
 let _authConfigLoaded = false;
+let _authDismissed = false; // X로 닫으면 이 페이지 세션 동안 재표시하지 않음
 async function _loadAuthConfig() {
   if (_authConfigLoaded) return;
   _authConfigLoaded = true;
@@ -743,6 +746,7 @@ async function _loadAuthConfig() {
   } catch (e) {}
 }
 function showAuth(errMsg) {
+  if (_authDismissed) return;
   const wasHidden = $("#auth-overlay").hidden;
   $("#auth-overlay").hidden = false;
   _loadAuthConfig();
@@ -760,13 +764,18 @@ function _closeAuth(key) {
   rs.forEach(r => r(key));
 }
 function askApiKey() {
-  // 401 응답 시 로그인 오버레이 표시 — 이메일 로그인 성공 시 리로드,
-  // API 키 입력 시 대기 중이던 요청을 키와 함께 재시도
+  // 401 응답 시 로그인 오버레이 표시 — 이메일 로그인 성공 시 리로드.
+  // X로 닫은 뒤에는 이 페이지에서 다시 띄우지 않는다.
+  if (_authDismissed) return Promise.resolve(null);
   return new Promise(res => {
     _authResolvers.push(res);
     showAuth();
   });
 }
+$("#auth-close").addEventListener("click", () => {
+  _authDismissed = true;
+  _closeAuth(null);
+});
 function _setAuthMode(mode) {
   _authMode = mode;
   $("#auth-name").hidden = mode !== "signup";
@@ -1809,7 +1818,7 @@ $("#settings-dialog").addEventListener("click", (e) => {
 });
 $("#settings-save").addEventListener("click", async () => {
   const st = $("#settings-status");
-  st.textContent = "저장 중…"; st.className = "status-line";
+  st.textContent = "저장합니다…"; st.className = "status-line";
   try {
     const res = await api("/settings", {method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -1818,10 +1827,7 @@ $("#settings-save").addEventListener("click", async () => {
         radar_interval: $("#set-radar-interval").value,
         coding_tool: $("#set-coding-tool").value,
         coding_model: $("#set-coding-model").value.trim()})});
-    const cj = res.cronjob || {};
-    const cjText = Object.entries(cj)
-      .map(([k, v]) => `${k}=${v}`).join(", ");
-    st.textContent = "저장됨" + (cjText ? ` (cron-job.org: ${cjText})` : "");
+    st.textContent = "저장했습니다";
     // 코드 어댑터 뷰의 기본 선택을 새 설정으로 갱신
     $("#coding-tool").innerHTML = "";
     loadCoding();
