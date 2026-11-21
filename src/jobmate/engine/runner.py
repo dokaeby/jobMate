@@ -296,7 +296,11 @@ class WorkflowRunner:
             stage_run_id = self.store.start_stage(
                 run_id, stage.key, attempt, {"summary": summary[:500]}
             ).id
-        decision = interrupt({"run_id": run_id, "stage": stage.key, "summary": summary})
+        if state.get("auto_approve"):
+            # cron 등 무인 수집 경로 — 승인 단계 없이 자동 approve하여 publish까지 진행
+            decision = {"decision": "approve", "comment": "auto_approve"}
+        else:
+            decision = interrupt({"run_id": run_id, "stage": stage.key, "summary": summary})
         raw_dec = (decision or {}).get("decision", "reject")
         dec: Literal["approve", "reject"] = "approve" if raw_dec == "approve" else "reject"
         comment = (decision or {}).get("comment", "")

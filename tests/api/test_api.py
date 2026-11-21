@@ -434,7 +434,7 @@ def test_settings_cronjob_autocreate(monkeypatch):
     monkeypatch.setattr(
         cronjob_mod.CronJobOrgClient,
         "update_schedule",
-        lambda self, sched: patched.append(self._job_id) or {},
+        lambda self, sched, **kw: patched.append(self._job_id) or {},
     )
 
     db = str(__import__("pathlib").Path(tempfile.mkdtemp()) / "t.db")

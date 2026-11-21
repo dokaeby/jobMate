@@ -1239,13 +1239,14 @@ def create_app(
         body = body or {}
         platforms = body.get("platforms") or settings.radar_platforms
         force = bool(body.get("force", True))
+        auto_approve = bool(body.get("auto_approve", False))
         jobs: list = []
         ids = []
         for p in platforms:
             rid = submit_run(
                 "skill_radar",
                 f"radar collect {p}",
-                {"platform": p, "force": force},
+                {"platform": p, "force": force, "auto_approve": auto_approve},
                 defer=jobs,
             )
             ids.append(rid)
@@ -1312,23 +1313,27 @@ def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> di
     ) -> str:
         """job id 확보(기존 → env → 자동 생성) 후 스케줄 갱신."""
         job_id = job_id or str(prefs.get(pref_key) or "")
+        # 요청 헤더/URL은 생성·갱신 모두에 사용 — API 키 로테이션 시
+        # 기존 job의 stale 헤더를 함께 갱신하기 위함.
+        req_headers: dict[str, str] = {"Content-Type": "application/json"}
+        jm_key = os.environ.get("JOBMATE_API_KEY", "")
+        if jm_key:
+            req_headers["X-API-Key"] = jm_key
+        req_url = (public_base.rstrip("/") + path) if public_base else ""
+        extended = {"headers": req_headers, "body": body} if (req_headers or body) else None
         if not job_id:
             if not api_key or not public_base:
                 out[label] = "skipped(no job id)"
                 return ""
             try:
-                headers = {"Content-Type": "application/json"}
-                jm_key = os.environ.get("JOBMATE_API_KEY", "")
-                if jm_key:
-                    headers["X-API-Key"] = jm_key
                 job_id = str(
                     create_job(
                         api_key,
                         base_url=settings.cronjob_base_url,
                         title=title,
-                        url=public_base.rstrip("/") + path,
+                        url=req_url,
                         schedule=schedule,
-                        headers=headers,
+                        headers=req_headers,
                         body=body,
                     )
                 )
@@ -1344,7 +1349,9 @@ def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> di
             out[label] = "skipped(no api key)"
             return ""
         try:
-            CronJobOrgClient(api_key, job_id, settings.cronjob_base_url).update_schedule(schedule)
+            CronJobOrgClient(api_key, job_id, settings.cronjob_base_url).update_schedule(
+                schedule, url=req_url or None, extended_data=extended
+            )
             out[label] = "updated" if "created" not in out.get(label, "") else out[label]
             logger.info("cronjob %s schedule updated job_id=%s", label, job_id)
         except Exception as e:
@@ -1369,7 +1376,8 @@ def _sync_cronjob(settings: Settings, store: Store, prefs: dict[str, Any]) -> di
         "cronjob_radar_job_id",
         "jobMate radar refresh",
         "/api/v1/radar/refresh",
-        json.dumps({"force": True}),
+        # auto_approve: 무인 cron 수집은 승인 없이 publish+푸시까지 진행
+        json.dumps({"force": True, "auto_approve": True}),
         radar_schedule,
         "radar",
     )
@@ -1572,7 +1580,7 @@ def _maybe_daily_radar(
     for p in settings.radar_platforms:
         if not store.radar_snapshot_exists(p, today):
             task = f"radar daily {p}"
-            ctx = {"platform": p, "force": False}
+            ctx = {"platform": p, "force": False, "auto_approve": True}
             if defer is not None:
                 run = store.create_run(
                     "skill_radar",

@@ -86,10 +86,21 @@ class CronJobOrgClient:
             return None
         return cls(api_key, job_id, settings.cronjob_base_url)
 
-    def update_schedule(self, schedule: dict[str, Any]) -> dict[str, Any]:
-        r = self._client.patch(
-            f"/jobs/{self._job_id}", headers=self._headers, json={"job": {"schedule": schedule}}
-        )
+    def update_schedule(
+        self,
+        schedule: dict[str, Any],
+        *,
+        url: str | None = None,
+        extended_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """스케줄 부분 갱신. url/extended_data(headers·body)도 함께 갱신 가능 —
+        API 키 로테이션 시 저장된 헤더가 stale해지는 것을 막기 위함."""
+        job: dict[str, Any] = {"schedule": schedule}
+        if url:
+            job["url"] = url
+        if extended_data:
+            job["extendedData"] = extended_data
+        r = self._client.patch(f"/jobs/{self._job_id}", headers=self._headers, json={"job": job})
         if r.status_code != 200:
             raise CronJobOrgError(f"cron-job.org PATCH failed: {r.status_code} {r.text[:200]}")
         return r.json()
