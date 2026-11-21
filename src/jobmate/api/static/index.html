@@ -2,8 +2,16 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>jobMate</title>
+<link rel="manifest" href="/static/manifest.json">
+<link rel="icon" type="image/png" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta name="theme-color" content="#2563eb">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="jobMate">
 <style>
   :root {
     --bg: #f8fafc; --surface: #ffffff; --surface-hover: #f1f5f9;
@@ -1775,6 +1783,15 @@ $("#push-toggle").addEventListener("click", async () => {
   try {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
       alert("이 브라우저는 Web Push를 지원하지 않습니다."); return; }
+    // iOS/iPadOS Safari는 홈 화면에 추가된 PWA에서만 Web Push 가능 (iOS 16.4+)
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+      || window.navigator.standalone === true;
+    if (isIOS && !isStandalone) {
+      alert("아이폰/아이패드에서는 Safari의 '공유 → 홈 화면에 추가'로 jobMate를 설치한 뒤,\n설치된 앱에서 알림을 켜주세요. (iOS 16.4 이상)");
+      return;
+    }
     const reg = await navigator.serviceWorker.register("/sw.js");
     if (btn.dataset.subscribed) {
       const sub = await reg.pushManager.getSubscription();
