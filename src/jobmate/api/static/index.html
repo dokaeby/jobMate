@@ -1781,9 +1781,8 @@ async function refreshPushState() {
 $("#push-toggle").addEventListener("click", async () => {
   const btn = $("#push-toggle");
   try {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-      alert("이 브라우저는 Web Push를 지원하지 않습니다."); return; }
-    // iOS/iPadOS Safari는 홈 화면에 추가된 PWA에서만 Web Push 가능 (iOS 16.4+)
+    // iOS/iPadOS Safari는 홈 화면에 추가된 PWA에서만 Web Push 가능 (iOS 16.4+).
+    // PushManager가 없는 구형 환경에서도 먼저 안내해야 하므로 지원 체크보다 앞에 둔다.
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
       || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches
@@ -1792,6 +1791,8 @@ $("#push-toggle").addEventListener("click", async () => {
       alert("아이폰/아이패드에서는 Safari의 '공유 → 홈 화면에 추가'로 jobMate를 설치한 뒤,\n설치된 앱에서 알림을 켜주세요. (iOS 16.4 이상)");
       return;
     }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      alert("이 브라우저는 Web Push를 지원하지 않습니다.\nSafari는 macOS 13+ / iOS 16.4+에서 지원됩니다."); return; }
     const reg = await navigator.serviceWorker.register("/sw.js");
     if (btn.dataset.subscribed) {
       const sub = await reg.pushManager.getSubscription();
