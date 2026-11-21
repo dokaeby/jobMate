@@ -231,6 +231,28 @@ CREATE TABLE IF NOT EXISTS email_summaries (
   PRIMARY KEY (source_provider, source_id)
 );
 
+-- 사용자 계정 (이메일/Google 로그인)
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  google_sub TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 세션 — 토큰 원문이 아닌 SHA-256 해시만 저장
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp ON auth_sessions(expires_at);
+
 -- 코딩 에이전트/CLI 작업 — 인메모리가 아닌 영속 job 상태
 CREATE TABLE IF NOT EXISTS coding_jobs (
   id TEXT PRIMARY KEY,
@@ -450,6 +472,26 @@ CREATE TABLE IF NOT EXISTS email_summaries (
   checked_at TEXT NOT NULL,
   PRIMARY KEY (source_provider, source_id)
 );
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  google_sub TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp ON auth_sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS coding_jobs (
   id TEXT PRIMARY KEY,
@@ -1485,6 +1527,96 @@ class Store:
         return [
             {"endpoint": r["endpoint"], "keys": _loads(decrypt_str(r["keys_json"]))} for r in rows
         ]
+
+    # ---- users / auth_sessions ----
+    @staticmethod
+    def _user_json(r: Any) -> dict[str, Any]:
+        return {
+            "id": r["id"],
+            "email": r["email"],
+            "display_name": r["display_name"],
+            "google_sub": r["google_sub"],
+            "created_at": r["created_at"],
+        }
+
+    def create_user(
+        self,
+        email: str,
+        password_hash: str = "",
+        display_name: str = "",
+        google_sub: str = "",
+    ) -> dict[str, Any] | None:
+        """신규 사용자 생성. email 중복 시 None."""
+        uid = uuid.uuid4().hex[:16]
+        now = _iso(_now())
+        try:
+            with self.tx() as c:
+                c.execute(
+                    "INSERT INTO users(id,email,password_hash,display_name,google_sub,"
+                    "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    (uid, email.lower(), password_hash, display_name, google_sub, now, now),
+                )
+        except self._integrity_errors:
+            return None
+        return self.get_user_by_email(email)
+
+    def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        r = self._conn.execute("SELECT * FROM users WHERE email=?", (email.lower(),)).fetchone()
+        return self._user_json(r) if r else None
+
+    def get_user_by_id(self, uid: str) -> dict[str, Any] | None:
+        r = self._conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        return self._user_json(r) if r else None
+
+    def get_user_by_google_sub(self, sub: str) -> dict[str, Any] | None:
+        r = self._conn.execute("SELECT * FROM users WHERE google_sub=?", (sub,)).fetchone()
+        return self._user_json(r) if r else None
+
+    def link_google_sub(self, uid: str, google_sub: str) -> None:
+        with self.tx() as c:
+            c.execute(
+                "UPDATE users SET google_sub=?, updated_at=? WHERE id=?",
+                (google_sub, _iso(_now()), uid),
+            )
+
+    def get_user_password_hash(self, email: str) -> tuple[str, str] | None:
+        """(user_id, password_hash) — 로그인 검증용. 비밀번호 계정만."""
+        r = self._conn.execute(
+            "SELECT id, password_hash FROM users WHERE email=?", (email.lower(),)
+        ).fetchone()
+        return (r["id"], r["password_hash"]) if r else None
+
+    def create_session(self, user_id: str, token_hash: str, ttl_days: int = 30) -> None:
+        """세션 생성 — id는 토큰의 SHA-256 해시(원문 토큰은 저장하지 않음)."""
+        now = _now()
+        exp = now + timedelta(days=ttl_days)
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO auth_sessions(id,user_id,created_at,expires_at) VALUES(?,?,?,?)",
+                (token_hash, user_id, _iso(now), _iso(exp)),
+            )
+
+    def get_session_user(self, token_hash: str) -> dict[str, Any] | None:
+        """유효 세션의 사용자 반환. 만료/폐기 세션은 None."""
+        r = self._conn.execute(
+            "SELECT u.id, u.email, u.display_name, u.google_sub, u.created_at, s.expires_at"
+            " FROM auth_sessions s JOIN users u ON u.id = s.user_id"
+            " WHERE s.id=? AND s.revoked_at IS NULL",
+            (token_hash,),
+        ).fetchone()
+        if not r:
+            return None
+        exp = _dt(r["expires_at"])
+        if exp is None or exp <= _now():
+            return None
+        return self._user_json(r)
+
+    def revoke_session(self, token_hash: str) -> None:
+        with self.tx() as c:
+            c.execute(
+                "UPDATE auth_sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                (_iso(_now()), token_hash),
+            )
 
     # ---- email_summaries (3줄 요약 카드) ----
     def save_email_summary(

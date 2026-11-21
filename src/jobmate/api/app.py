@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -211,11 +211,17 @@ def create_app(
         from ..security import authorized
 
         path = request.url.path
-        # API 키 인증: /api/* 전체. health 체크와 외부 webhook(자체 서명 검증)은 제외
+        # API 키 인증: /api/* 전체. health 체크와 외부 webhook(자체 서명 검증),
+        # cron tick(자체 시크릿), 계정 인증 엔드포인트는 제외
         if path.startswith("/api/") and not path.startswith(
-            ("/api/v1/health", "/api/v1/webhooks/", "/api/v1/cron/tick")
+            (
+                "/api/v1/health",
+                "/api/v1/webhooks/",
+                "/api/v1/cron/tick",
+                "/api/v1/auth/",
+            )
         ):
-            if not authorized(request):
+            if not (authorized(request) or _session_user(request)):
                 logger.warning("api auth failed: %s", path)
                 return err(401, "unauthorized", "invalid or missing API key", request)
         response = await call_next(request)
@@ -339,14 +345,21 @@ def create_app(
             threading.Thread(target=execute_run, args=job, daemon=True).start()
         return run.id
 
+    def _session_user(request: Request) -> dict[str, Any] | None:
+        """세션 쿠키 → 유효 사용자. 만료/무효 시 None."""
+        from ..security import SESSION_COOKIE, hash_token
+
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if not token:
+            return None
+        return store.get_session_user(hash_token(token))
+
     @app.get("/")
     def index() -> HTMLResponse:
-        # 대시보드 첫 접속 시 API 키 입력 없이 바로 사용하도록
-        # 설정된 키를 페이지에 주입한다(개인용 단일 사용자 전제).
-        from ..security import api_key
-
+        # 로그인제가 도입되어 API 키는 더 이상 페이지에 주입하지 않는다.
+        # ?key= 파라미터나 localStorage 키는 관리자/머신용 폴백으로 유지.
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html.replace("__JOBMATE_API_KEY__", api_key()))
+        return HTMLResponse(html.replace("__JOBMATE_API_KEY__", ""))
 
     @app.get("/sw.js")
     def service_worker() -> FileResponse:
@@ -1286,6 +1299,229 @@ def create_app(
         send_web_push_text(adapters, "jobMate 테스트 알림", "Web Push 연결이 정상입니다.", "/")
         logger.info("push test sent: subs=%d", len(subs))
         return {"status": "sent", "sent": len(subs)}
+
+    # ---- 계정 인증 (이메일+비밀번호 / Google OAuth) ----
+    import re
+    from urllib.parse import urlencode
+
+    import httpx
+
+    from ..security import (
+        OAUTH_STATE_COOKIE,
+        SESSION_COOKIE,
+        SESSION_TTL_DAYS,
+        email_allowed,
+        hash_password,
+        hash_token,
+        new_session_token,
+        verify_password,
+    )
+
+    _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    _login_fails: dict[str, list[float]] = {}
+    _LOGIN_WINDOW = 600.0
+    _LOGIN_MAX_FAILS = 10
+
+    def _pub_user(u: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": u["id"],
+            "email": u["email"],
+            "display_name": u["display_name"],
+        }
+
+    def _set_session(response: Any, request: Request, user_id: str) -> None:
+        token = new_session_token()
+        store.create_session(user_id, hash_token(token), SESSION_TTL_DAYS)
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            max_age=SESSION_TTL_DAYS * 86400,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+
+    def _login_key(request: Request, email: str) -> str:
+        ip = request.client.host if request.client else "-"
+        return f"{ip}:{email.strip().lower()}"
+
+    def _login_throttled(key: str) -> bool:
+        now = time.time()
+        fails = [t for t in _login_fails.get(key, []) if now - t < _LOGIN_WINDOW]
+        _login_fails[key] = fails
+        return len(fails) >= _LOGIN_MAX_FAILS
+
+    def _login_record(key: str, ok: bool) -> None:
+        if ok:
+            _login_fails.pop(key, None)
+        else:
+            _login_fails.setdefault(key, []).append(time.time())
+
+    @app.post("/api/v1/auth/signup")
+    def auth_signup(body: dict[str, Any], request: Request) -> JSONResponse:
+        email = str(body.get("email", "")).strip().lower()
+        password = str(body.get("password", ""))
+        name = str(body.get("display_name", "")).strip()[:80]
+        if not _EMAIL_RE.match(email):
+            return err(400, "invalid_email", "이메일 형식이 올바르지 않습니다", request)
+        if len(password) < 8:
+            return err(400, "weak_password", "비밀번호는 8자 이상이어야 합니다", request)
+        if not email_allowed(email):
+            logger.warning("signup denied (not allowed): %s", email)
+            return err(403, "email_not_allowed", "허용되지 않은 이메일입니다", request)
+        user = store.create_user(email, hash_password(password), name)
+        if user is None:
+            return err(409, "email_taken", "이미 가입된 이메일입니다", request)
+        logger.info("auth signup: user=%s", user["id"])
+        resp = JSONResponse({"user": _pub_user(user)}, status_code=201)
+        _set_session(resp, request, user["id"])
+        return resp
+
+    @app.post("/api/v1/auth/login")
+    def auth_login(body: dict[str, Any], request: Request) -> JSONResponse:
+        email = str(body.get("email", "")).strip().lower()
+        password = str(body.get("password", ""))
+        key = _login_key(request, email)
+        if _login_throttled(key):
+            logger.warning("login throttled: %s", key)
+            return err(
+                429, "too_many_attempts", "시도 횟수 초과 — 잠시 후 다시 시도하세요", request
+            )
+        row = store.get_user_password_hash(email)
+        if row is None or not row[1] or not verify_password(password, row[1]):
+            _login_record(key, ok=False)
+            logger.info("login failed: %s", email)
+            return err(
+                401, "invalid_credentials", "이메일 또는 비밀번호가 올바르지 않습니다", request
+            )
+        if not email_allowed(email):
+            return err(403, "email_not_allowed", "허용되지 않은 이메일입니다", request)
+        _login_record(key, ok=True)
+        user = store.get_user_by_id(row[0])
+        logger.info("auth login: user=%s", row[0])
+        resp = JSONResponse({"user": _pub_user(user) if user else {}})
+        _set_session(resp, request, row[0])
+        return resp
+
+    @app.post("/api/v1/auth/logout")
+    def auth_logout(request: Request) -> Any:
+        resp = JSONResponse({"status": "logged_out"})
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if token:
+            store.revoke_session(hash_token(token))
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
+
+    @app.get("/api/v1/auth/config")
+    def auth_config() -> dict[str, bool]:
+        """로그인 화면용 공개 설정 — 외부 노출 정보 없음."""
+        return {"google_enabled": bool(os.environ.get("GOOGLE_CLIENT_ID", "").strip())}
+
+    @app.get("/api/v1/auth/me")
+    def auth_me(request: Request) -> JSONResponse:
+        user = _session_user(request)
+        if user is None:
+            return err(401, "unauthorized", "로그인이 필요합니다", request)
+        return JSONResponse({"user": _pub_user(user)})
+
+    def _google_redirect_uri(request: Request) -> str:
+        return os.environ.get("GOOGLE_REDIRECT_URI", "").strip() or (
+            str(request.base_url).rstrip("/") + "/api/v1/auth/google/callback"
+        )
+
+    @app.get("/api/v1/auth/google")
+    def auth_google(request: Request) -> Any:
+        client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+        if not client_id:
+            return err(501, "not_configured", "Google 로그인이 설정되지 않았습니다", request)
+        state = new_session_token()
+        url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(
+            {
+                "client_id": client_id,
+                "redirect_uri": _google_redirect_uri(request),
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": state,
+                "prompt": "select_account",
+            }
+        )
+        resp = RedirectResponse(url, status_code=302)
+        resp.set_cookie(
+            OAUTH_STATE_COOKIE,
+            state,
+            max_age=600,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+        return resp
+
+    @app.get("/api/v1/auth/google/callback")
+    def auth_google_callback(
+        request: Request, code: str = "", state: str = "", error: str = ""
+    ) -> Any:
+        def back(q: str) -> RedirectResponse:
+            return RedirectResponse(f"/?auth_error={q}", status_code=302)
+
+        if error:
+            return back("google_denied")
+        expected = request.cookies.get(OAUTH_STATE_COOKIE, "")
+        if not state or not expected or state != expected:
+            logger.warning("google oauth state mismatch")
+            return err(400, "bad_state", "OAuth state 불일치", request)
+        client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+        if not client_id or not client_secret:
+            return err(501, "not_configured", "Google 로그인이 설정되지 않았습니다", request)
+        try:
+            token_resp = httpx.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": _google_redirect_uri(request),
+                    "grant_type": "authorization_code",
+                },
+                timeout=15,
+            )
+            token_resp.raise_for_status()
+            access_token = token_resp.json().get("access_token", "")
+            info_resp = httpx.get(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=15,
+            )
+            info_resp.raise_for_status()
+            info = info_resp.json()
+        except Exception as e:
+            logger.warning("google oauth exchange failed: %s", str(e)[:200])
+            return back("google_exchange_failed")
+        gsub = str(info.get("sub", ""))
+        email = str(info.get("email", "")).strip().lower()
+        name = str(info.get("name", "")).strip()[:80]
+        if not gsub or not _EMAIL_RE.match(email):
+            return back("google_no_email")
+        if not email_allowed(email):
+            logger.warning("google login denied (not allowed): %s", email)
+            return back("email_not_allowed")
+        user = store.get_user_by_google_sub(gsub)
+        if user is None:
+            user = store.get_user_by_email(email)
+            if user is not None and not user.get("google_sub"):
+                store.link_google_sub(user["id"], gsub)
+        if user is None:
+            user = store.create_user(email, "", name, gsub)
+            if user is None:
+                return back("signup_failed")
+            logger.info("auth signup via google: user=%s", user["id"])
+        logger.info("auth login via google: user=%s", user["id"])
+        resp = RedirectResponse("/", status_code=302)
+        _set_session(resp, request, user["id"])
+        resp.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+        return resp
 
     return app
 

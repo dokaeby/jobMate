@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import logging
 import os
 from typing import Any
@@ -91,3 +92,67 @@ def authorized(request: Any) -> bool:
     if auth.lower().startswith("bearer "):
         provided = auth[7:].strip() or provided
     return provided == key
+
+
+# ---------- 계정 인증 (세션 쿠키 + 이메일/Google 로그인) ----------
+
+SESSION_COOKIE = "jobmate_session"
+OAUTH_STATE_COOKIE = "jobmate_oauth_state"
+SESSION_TTL_DAYS = 30
+SCRYPT_N = 2**14
+SCRYPT_R = 8
+SCRYPT_P = 1
+
+
+def hash_password(password: str) -> str:
+    """scrypt 해시 → 'scrypt$N$r$p$<salt_b64>$<hash_b64>' 저장 형식."""
+    salt = os.urandom(16)
+    dk = hashlib.scrypt(password.encode(), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32)
+    return (
+        f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}$"
+        f"{base64.urlsafe_b64encode(salt).decode()}${base64.urlsafe_b64encode(dk).decode()}"
+    )
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """저장된 scrypt 해시와 평문 비교. 형식 불일치/실패 시 False."""
+    try:
+        scheme, n, r, p, salt_b64, hash_b64 = stored.split("$")
+        if scheme != "scrypt":
+            return False
+        salt = base64.urlsafe_b64decode(salt_b64)
+        expected = base64.urlsafe_b64decode(hash_b64)
+        dk = hashlib.scrypt(
+            password.encode(),
+            salt=salt,
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=len(expected),
+        )
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
+
+
+def new_session_token() -> str:
+    """세션 토큰 — URL-safe 랜덤 256bit."""
+    import secrets
+
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(token: str) -> str:
+    """세션 토큰의 저장용 SHA-256 — DB 유출 시 토큰 원문 복구 불가."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def allowed_emails() -> set[str]:
+    """JOBMATE_ALLOWED_EMAILS(쉼표 구분)가 설정되면 해당 이메일만 가입/로그인 허용."""
+    raw = os.environ.get("JOBMATE_ALLOWED_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def email_allowed(email: str) -> bool:
+    allowed = allowed_emails()
+    return not allowed or email.strip().lower() in allowed

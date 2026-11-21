@@ -407,6 +407,7 @@
   <span class="brand-sub">에이전트 하네스</span>
   <div class="header-actions">
     <button class="secondary" id="push-toggle">알림 켜기</button>
+    <button class="secondary" id="logout-btn" title="로그아웃">⎋</button>
     <button class="secondary" id="settings-open" title="설정">⚙</button>
   </div>
 </header>
@@ -670,15 +671,29 @@
 
 <div id="auth-overlay" hidden
      style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100">
-  <div class="card" style="width:320px">
-    <div class="card-title">API 키 필요</div>
-    <div class="card-body">서버에 인증이 설정되어 있습니다. API 키를 입력하세요.</div>
-    <input id="auth-key" type="password" placeholder="API 키"
-           style="width:100%;margin:10px 0;box-sizing:border-box">
+  <div class="card" style="width:340px">
+    <div class="card-title">jobMate 로그인</div>
+    <div style="display:flex;gap:6px;margin:10px 0">
+      <button id="auth-tab-login" class="secondary auth-tab" style="flex:1">로그인</button>
+      <button id="auth-tab-signup" class="secondary auth-tab" style="flex:1">회원가입</button>
+    </div>
+    <input id="auth-email" type="email" placeholder="이메일"
+           style="width:100%;margin:6px 0;box-sizing:border-box">
+    <input id="auth-name" placeholder="이름 (선택)" hidden
+           style="width:100%;margin:6px 0;box-sizing:border-box">
+    <input id="auth-password" type="password" placeholder="비밀번호 (8자 이상)"
+           style="width:100%;margin:6px 0;box-sizing:border-box">
     <div id="auth-err" class="card-meta" role="alert"
          style="color:#e5484d;min-height:1em"></div>
-    <button id="auth-submit" style="width:100%">확인</button>
-    <button id="auth-cancel" class="secondary" style="width:100%;margin-top:6px">취소</button>
+    <button id="auth-submit" style="width:100%">로그인</button>
+    <a id="auth-google" href="/api/v1/auth/google"
+       style="display:block;text-align:center;margin-top:10px;padding:9px;border:1px solid var(--border-strong);border-radius:10px;color:var(--ink);text-decoration:none;font-weight:600;background:var(--surface)">Google로 계속하기</a>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted)">API 키로 접속</summary>
+      <input id="auth-key" type="password" placeholder="API 키"
+             style="width:100%;margin:8px 0;box-sizing:border-box">
+      <button id="auth-key-submit" class="secondary" style="width:100%">확인</button>
+    </details>
   </div>
 </div>
 
@@ -710,17 +725,40 @@ function apiHeaders() {
   }
 })();
 let _authResolvers = [];
-function askApiKey() {
-  return new Promise(res => {
-    const first = _authResolvers.length === 0;
-    _authResolvers.push(res);
-    $("#auth-overlay").hidden = false;
-    if (first) {
-      $("#auth-key").value = "";
-      $("#auth-err").textContent = "";
-    }
-    setTimeout(() => $("#auth-key").focus(), 50);
-  });
+let _authMode = "login"; // login | signup
+const _AUTH_ERR_MSG = {
+  google_denied: "Google 로그인이 취소되었습니다",
+  google_exchange_failed: "Google 인증 처리에 실패했습니다",
+  google_no_email: "Google 계정의 이메일을 확인할 수 없습니다",
+  email_not_allowed: "허용되지 않은 이메일입니다",
+  signup_failed: "회원가입에 실패했습니다",
+};
+const _authErrParam = new URLSearchParams(location.search).get("auth_error") || "";
+if (_authErrParam) {
+  const p = new URLSearchParams(location.search); p.delete("auth_error");
+  const q = p.toString();
+  history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
+}
+let _authConfigLoaded = false;
+async function _loadAuthConfig() {
+  if (_authConfigLoaded) return;
+  _authConfigLoaded = true;
+  try {
+    const r = await fetch(API + "/auth/config");
+    const j = await r.json();
+    if (!j.google_enabled) $("#auth-google").style.display = "none";
+  } catch (e) {}
+}
+function showAuth(errMsg) {
+  const wasHidden = $("#auth-overlay").hidden;
+  $("#auth-overlay").hidden = false;
+  _loadAuthConfig();
+  if (wasHidden || errMsg) {
+    $("#auth-err").textContent = errMsg || _AUTH_ERR_MSG[_authErrParam] || "";
+    $("#auth-email").value = "";
+    $("#auth-password").value = "";
+  }
+  setTimeout(() => $("#auth-email").focus(), 50);
 }
 function _closeAuth(key) {
   $("#auth-overlay").hidden = true;
@@ -728,15 +766,56 @@ function _closeAuth(key) {
   _authResolvers = [];
   rs.forEach(r => r(key));
 }
-$("#auth-submit").addEventListener("click", () => {
+function askApiKey() {
+  // 401 응답 시 로그인 오버레이 표시 — 이메일 로그인 성공 시 리로드,
+  // API 키 입력 시 대기 중이던 요청을 키와 함께 재시도
+  return new Promise(res => {
+    _authResolvers.push(res);
+    showAuth();
+  });
+}
+function _setAuthMode(mode) {
+  _authMode = mode;
+  $("#auth-name").hidden = mode !== "signup";
+  $("#auth-submit").textContent = mode === "signup" ? "가입하기" : "로그인";
+  $("#auth-tab-login").style.fontWeight = mode === "login" ? "700" : "";
+  $("#auth-tab-signup").style.fontWeight = mode === "signup" ? "700" : "";
+}
+$("#auth-tab-login").addEventListener("click", () => _setAuthMode("login"));
+$("#auth-tab-signup").addEventListener("click", () => _setAuthMode("signup"));
+$("#auth-submit").addEventListener("click", async () => {
+  const email = $("#auth-email").value.trim();
+  const password = $("#auth-password").value;
+  const errEl = $("#auth-err");
+  errEl.textContent = "";
+  if (!email || !password) { errEl.textContent = "이메일과 비밀번호를 입력하세요"; return; }
+  const body = {email, password};
+  if (_authMode === "signup") body.display_name = $("#auth-name").value.trim();
+  try {
+    const r = await fetch(API + "/auth/" + _authMode, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      errEl.textContent = j.error ? j.error.message : "인증 실패";
+      return;
+    }
+    location.reload();
+  } catch (e) { errEl.textContent = "네트워크 오류"; }
+});
+$("#auth-key-submit").addEventListener("click", () => {
   const k = $("#auth-key").value.trim();
   if (!k) { $("#auth-err").textContent = "키를 입력하세요"; return; }
   localStorage.setItem("jobmate_api_key", k);
   _closeAuth(k);
 });
-$("#auth-cancel").addEventListener("click", () => _closeAuth(null));
-$("#auth-key").addEventListener("keydown", e => {
+$("#auth-password").addEventListener("keydown", e => {
   if (e.key === "Enter") $("#auth-submit").click();
+});
+$("#logout-btn").addEventListener("click", async () => {
+  try { await fetch(API + "/auth/logout", {method: "POST"}); } catch (e) {}
+  localStorage.removeItem("jobmate_api_key");
+  location.reload();
 });
 
 async function api(path, opts, _retried) {
