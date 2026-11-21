@@ -1275,6 +1275,18 @@ def create_app(
             logger.info("push unsubscribed: sub=%s", _endpoint_fp(endpoint))
         return {"status": "unsubscribed"}
 
+    @app.post("/api/v1/push/test")
+    def push_test() -> dict[str, Any]:
+        """구독된 모든 디바이스로 테스트 푸시 발송 — 연결 검증용."""
+        subs = store.list_push_subscriptions()
+        if not subs:
+            return {"status": "no_subscriptions", "sent": 0}
+        from ..engine.functions import send_web_push_text
+
+        send_web_push_text(adapters, "jobMate 테스트 알림", "Web Push 연결이 정상입니다.", "/")
+        logger.info("push test sent: subs=%d", len(subs))
+        return {"status": "sent", "sent": len(subs)}
+
     return app
 
 
@@ -1493,6 +1505,10 @@ def _process_due_notification_jobs(store: Store, adapters: dict[str, Any]) -> No
                             pass
                     break
             notifier.send(title=title, body="", source_url=source_url)
+            # notifier는 로컬 로그용 — 실제 디바이스 푸시는 webpush 채널로도 발송
+            from ..engine.functions import send_web_push_text
+
+            send_web_push_text(adapters, title, "", source_url)
             store.mark_job(job["id"], "delivered")
             logger.debug("notification job %s delivered", job["id"])
         except Exception as e:

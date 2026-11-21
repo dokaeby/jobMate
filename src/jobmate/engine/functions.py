@@ -354,6 +354,17 @@ def gmail_notify(ctx: FunctionContext) -> dict[str, Any]:
         return {"status": "notify_failed", "notification_id": n.id, "error": str(e)[:300]}
 
 
+def send_web_push_text(adapters: dict[str, Any], title: str, body: str, source_url: str) -> None:
+    """webpush adapter best-effort 발송 — 실패는 warning으로만 남긴다."""
+    push = adapters.get("webpush")
+    if push is None:
+        return
+    try:
+        push.send(title=title, body=body, source_url=source_url)
+    except Exception as e:
+        logger.warning("webpush send failed: %s", str(e)[:200])
+
+
 def _send_web_push(ctx: FunctionContext, n: Any) -> None:
     """Web Push 채널 — best-effort. 실패해도 알림 상태는 SENT 유지."""
     push = ctx.adapters.get("webpush")
@@ -714,6 +725,7 @@ def _radar_notify(ctx: FunctionContext, title: str, body: str, url: str = "") ->
         return
     try:
         notifier.send(title=title, body=body, source_url=url)
+        send_web_push_text(ctx.adapters, title, body, url)
     except Exception as e:
         ctx.store.audit(ctx.run_id, "tool", "radar_notify_error", "", {"error": str(e)[:200]})
         logger.warning("radar notify failed run=%s: %s", ctx.run_id, str(e)[:200])
