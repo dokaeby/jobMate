@@ -686,6 +686,17 @@ function apiHeaders() {
   if (key) headers["X-API-Key"] = key;
   return headers;
 }
+// ?key=... 로 진입하면 localStorage에 저장하고 URL에서 제거 (북마크 한 번이면 이후 자동 인증)
+(() => {
+  const p = new URLSearchParams(location.search);
+  const k = (p.get("key") || p.get("api_key") || "").trim();
+  if (k) {
+    localStorage.setItem("jobmate_api_key", k);
+    p.delete("key"); p.delete("api_key");
+    const q = p.toString();
+    history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
+  }
+})();
 let _authResolvers = [];
 function askApiKey() {
   return new Promise(res => {
