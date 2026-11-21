@@ -142,6 +142,7 @@ def _wait_text(page: Page, selector: str, text: str) -> None:
 
 def test_gmail_view_empty_state(page: Page) -> None:
     """메시지가 없으면 빈 상태 문구를 표시한다."""
+    page.click('.nav-item[data-view="gmail"]')
     _wait_text(page, "#gmail-cards", "메시지 없음")
 
 
@@ -184,7 +185,7 @@ def test_settings_dialog_save(page: Page, base_url: str) -> None:
     page.select_option("#set-coding-tool", "codex")
     page.click("#settings-save")
     page.wait_for_function(
-        "document.querySelector('#settings-status').textContent.includes('저장됨')",
+        "document.querySelector('#settings-status').textContent.includes('저장했습니다')",
         timeout=5000,
     )
     resp = page.request.get(base_url + "/api/v1/settings")
