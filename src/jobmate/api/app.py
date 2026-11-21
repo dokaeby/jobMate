@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -340,8 +340,13 @@ def create_app(
         return run.id
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+    def index() -> HTMLResponse:
+        # 대시보드 첫 접속 시 API 키 입력 없이 바로 사용하도록
+        # 설정된 키를 페이지에 주입한다(개인용 단일 사용자 전제).
+        from ..security import api_key
+
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(html.replace("__JOBMATE_API_KEY__", api_key()))
 
     @app.get("/sw.js")
     def service_worker() -> FileResponse:

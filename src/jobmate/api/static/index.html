@@ -676,13 +676,17 @@
 
 <script>
 const API = "/api/v1";
+// 서버(index 라우트)가 서빙 시 실제 키로 치환. 치환 안 된 플레이스홀더는 미주입으로 간주.
+const EMBEDDED_API_KEY = "__JOBMATE_API_KEY__";
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 function apiHeaders() {
   const headers = {};
-  const key = localStorage.getItem("jobmate_api_key") || "";
+  // 서버 주입 키가 항상 최신 — localStorage의 오래된 키가 401을 유발하지 않도록 우선 사용
+  const emb = EMBEDDED_API_KEY.startsWith("__") ? "" : EMBEDDED_API_KEY;
+  const key = emb || localStorage.getItem("jobmate_api_key") || "";
   if (key) headers["X-API-Key"] = key;
   return headers;
 }
