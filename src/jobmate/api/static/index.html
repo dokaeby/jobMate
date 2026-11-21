@@ -49,6 +49,11 @@
   button:hover { background: var(--accent-hover); }
   button.secondary { background: transparent; color: var(--accent); }
   button.secondary:hover { background: var(--accent-soft); }
+  .header-actions .icon-btn {
+    width: 34px; height: 34px; padding: 0; display: inline-flex;
+    align-items: center; justify-content: center;
+  }
+  #push-toggle.on { color: var(--ok); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   /* ── 레이아웃: 사이드바 + 메인 ── */
   .app-body {
@@ -405,9 +410,15 @@
 <header class="app-header">
   <a class="brand" href="#">jobMate</a>
   <div class="header-actions">
-    <button class="secondary" id="push-toggle">알림 켜기</button>
-    <button class="secondary" id="logout-btn" title="로그아웃">⎋</button>
-    <button class="secondary" id="settings-open" title="설정">⚙</button>
+    <button class="secondary icon-btn" id="push-toggle" title="알림 켜기" aria-label="알림 켜기">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+    </button>
+    <button class="secondary icon-btn" id="logout-btn" title="로그아웃" aria-label="로그아웃">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </button>
+    <button class="secondary icon-btn" id="settings-open" title="설정" aria-label="설정">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
   </div>
 </header>
 
@@ -415,17 +426,17 @@
   <aside class="sidebar">
     <span class="nav-label">메뉴</span>
     <nav>
-      <button class="nav-item active" data-view="gmail"><span class="ico">✉</span>Gmail Checker</button>
+      <button class="nav-item active" data-view="radar"><span class="ico">◈</span>Skill Radar</button>
+      <button class="nav-item" data-view="gmail"><span class="ico">✉</span>Gmail Checker</button>
       <button class="nav-item" data-view="coding"><span class="ico">⌘</span>코딩 에이전트</button>
       <button class="nav-item" data-view="calendar"><span class="ico">▣</span>Calendar</button>
-      <button class="nav-item" data-view="radar"><span class="ico">◈</span>Skill Radar</button>
       <button class="nav-item" data-view="runs"><span class="ico">▶</span>실행 이력</button>
     </nav>
   </aside>
 
   <main class="main">
     <!-- Gmail Checker -->
-    <section id="view-gmail">
+    <section id="view-gmail" hidden>
       <div class="page-head">
         <h1 class="page-title">Gmail Checker</h1>
         <p class="page-desc">수신함 메시지 요약 및 일정 추출 상태</p>
@@ -484,7 +495,7 @@
     </section>
 
     <!-- Skill Radar (skillRadar UI 포팅) -->
-    <section id="view-radar" hidden>
+    <section id="view-radar">
       <div class="sr-root" id="sr-root">
         <header class="sr-header">
           <div class="sr-header-top">
@@ -821,6 +832,9 @@ async function api(path, opts, _retried) {
   if (r.status === 401 && !_retried) {
     const k = await askApiKey();
     if (k) return api(path, opts, true);
+  }
+  if (r.status === 401) {
+    throw new Error("로그인이 필요합니다 — 새로고침 후 로그인해주세요");
   }
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
@@ -1846,8 +1860,9 @@ async function refreshPushState() {
   try {
     const reg = await navigator.serviceWorker.getRegistration("/");
     const sub = reg && (await reg.pushManager.getSubscription());
-    btn.textContent = sub ? "알림 끄기" : "알림 켜기";
-    btn.dataset.subscribed = sub ? "1" : "";
+    btn.classList.toggle("on", !!sub);
+    btn.title = sub ? "알림 끄기" : "알림 켜기";
+    btn.setAttribute("aria-label", sub ? "알림 끄기" : "알림 켜기");
   } catch (e) {}
 }
 $("#push-toggle").addEventListener("click", async () => {
@@ -1866,7 +1881,7 @@ $("#push-toggle").addEventListener("click", async () => {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
       alert("이 브라우저는 Web Push를 지원하지 않습니다.\nSafari는 macOS 13+ / iOS 16.4+에서 지원됩니다."); return; }
     const reg = await navigator.serviceWorker.register("/sw.js");
-    if (btn.dataset.subscribed) {
+    if (btn.classList.contains("on")) {
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
         await api("/push/unsubscribe", {method:"POST",
@@ -1887,7 +1902,7 @@ $("#push-toggle").addEventListener("click", async () => {
 });
 
 refreshPushState();
-VIEWS.gmail();
+VIEWS.radar();
 setInterval(() => { if (!document.getElementById("view-gmail").hidden) loadGmail(); }, 10000);
 setInterval(refreshRuns, 5000);
 </script>
