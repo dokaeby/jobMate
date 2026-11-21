@@ -404,7 +404,6 @@
 <body>
 <header class="app-header">
   <a class="brand" href="#">jobMate</a>
-  <span class="brand-sub">에이전트 하네스</span>
   <div class="header-actions">
     <button class="secondary" id="push-toggle">알림 켜기</button>
     <button class="secondary" id="logout-btn" title="로그아웃">⎋</button>
@@ -688,12 +687,6 @@
     <button id="auth-submit" style="width:100%">로그인</button>
     <a id="auth-google" href="/api/v1/auth/google"
        style="display:block;text-align:center;margin-top:10px;padding:9px;border:1px solid var(--border-strong);border-radius:10px;color:var(--ink);text-decoration:none;font-weight:600;background:var(--surface)">Google로 계속하기</a>
-    <details style="margin-top:12px">
-      <summary style="cursor:pointer;font-size:12px;color:var(--muted)">API 키로 접속</summary>
-      <input id="auth-key" type="password" placeholder="API 키"
-             style="width:100%;margin:8px 0;box-sizing:border-box">
-      <button id="auth-key-submit" class="secondary" style="width:100%">확인</button>
-    </details>
   </div>
 </div>
 
@@ -802,12 +795,6 @@ $("#auth-submit").addEventListener("click", async () => {
     }
     location.reload();
   } catch (e) { errEl.textContent = "네트워크 오류"; }
-});
-$("#auth-key-submit").addEventListener("click", () => {
-  const k = $("#auth-key").value.trim();
-  if (!k) { $("#auth-err").textContent = "키를 입력하세요"; return; }
-  localStorage.setItem("jobmate_api_key", k);
-  _closeAuth(k);
 });
 $("#auth-password").addEventListener("keydown", e => {
   if (e.key === "Enter") $("#auth-submit").click();
